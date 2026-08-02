@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>家計簿</title>
+
+<!-- PWA / iPhone home screen -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="家計簿">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="background-elements">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+</div>
+
+<div class="app-shell">
+
+  <!-- ============ HEADER ============ -->
+  <header class="app-header">
+    <h1 id="appTitle" class="app-title">家計簿</h1>
+    <button id="editTitleBtn" class="icon-btn" aria-label="タイトルを編集">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
+  </header>
+
+  <main class="app-main">
+
+    <!-- ============ 我慢 TAB ============ -->
+    <section class="tab-panel active" id="tab-gaman" data-tab="gaman">
+      <div class="stat-card glass-card accent-gaman">
+        <span class="stat-label">累計我慢金額</span>
+        <div class="stat-amount"><span class="yen">¥</span><span id="gamanTotal">0</span></div>
+        <p class="stat-sub">我慢はあなたの資産になる 🌱</p>
+      </div>
+
+      <form id="gamanForm" class="entry-form glass-card">
+        <h2 class="form-title">我慢を記録する</h2>
+        <div class="form-group">
+          <label for="gamanName">我慢したアイテム</label>
+          <input type="text" id="gamanName" placeholder="例: コンビニのコーヒー" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group half">
+            <label for="gamanPrice">金額 (¥)</label>
+            <input type="number" id="gamanPrice" placeholder="500" min="1" required>
+          </div>
+          <div class="form-group half">
+            <label for="gamanDate">日付</label>
+            <input type="date" id="gamanDate" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary accent-gaman-bg">
+          <span>記録する</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
+        </button>
+      </form>
+
+      <div class="list-section">
+        <div class="list-header">
+          <h2>履歴</h2>
+          <button class="btn-text" data-clear="gaman">全て削除</button>
+        </div>
+        <div id="gamanHistory" class="history-list"></div>
+      </div>
+    </section>
+
+    <!-- ============ 使用 TAB ============ -->
+    <section class="tab-panel" id="tab-use" data-tab="use">
+      <div class="stat-card glass-card accent-use">
+        <div class="stat-grid">
+          <div>
+            <span class="stat-label">今月の使用累計</span>
+            <div class="stat-amount small"><span class="yen">¥</span><span id="useMonthTotal">0</span></div>
+          </div>
+          <div>
+            <span class="stat-label">残り使用可能額</span>
+            <div class="stat-amount small" id="useRemainingWrap"><span class="yen">¥</span><span id="useRemaining">0</span></div>
+          </div>
+        </div>
+        <div class="progress-track">
+          <div id="useProgressBar" class="progress-fill"></div>
+        </div>
+        <div class="limit-editor">
+          <label for="useLimitInput">今月の上限目標</label>
+          <div class="limit-editor-row">
+            <span class="yen">¥</span>
+            <input type="number" id="useLimitInput" min="0" placeholder="30000">
+            <button id="saveLimitBtn" class="btn-small">設定</button>
+          </div>
+        </div>
+      </div>
+
+      <form id="useForm" class="entry-form glass-card">
+        <h2 class="form-title">使用を記録する</h2>
+        <div class="form-group">
+          <label for="useName">項目</label>
+          <input type="text" id="useName" placeholder="例: ランチ" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group half">
+            <label for="usePrice">金額 (¥)</label>
+            <input type="number" id="usePrice" placeholder="1000" min="1" required>
+          </div>
+          <div class="form-group half">
+            <label for="useDate">日付</label>
+            <input type="date" id="useDate" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="useMethod">決済媒体</label>
+          <select id="useMethod"></select>
+        </div>
+        <button type="submit" class="btn-primary accent-use-bg">
+          <span>記録する</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
+        </button>
+        <button type="button" class="btn-text" id="editMethodsBtn">決済媒体を編集</button>
+      </form>
+
+      <div class="list-section">
+        <div class="list-header">
+          <h2>履歴</h2>
+          <button class="btn-text" data-clear="use">全て削除</button>
+        </div>
+        <div id="useHistory" class="history-list"></div>
+      </div>
+    </section>
+
+    <!-- ============ 家計簿 TAB ============ -->
+    <section class="tab-panel" id="tab-kakeibo" data-tab="kakeibo">
+      <div class="stat-card glass-card accent-kakeibo">
+        <div class="stat-grid three">
+          <div>
+            <span class="stat-label">今月の収入</span>
+            <div class="stat-amount small plus"><span class="yen">¥</span><span id="kakeiboIncomeTotal">0</span></div>
+          </div>
+          <div>
+            <span class="stat-label">今月の支出</span>
+            <div class="stat-amount small minus"><span class="yen">¥</span><span id="kakeiboExpenseTotal">0</span></div>
+          </div>
+          <div>
+            <span class="stat-label">差額（貯金）</span>
+            <div class="stat-amount small" id="kakeiboBalanceWrap"><span class="yen">¥</span><span id="kakeiboBalance">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subtab-switch">
+        <button class="subtab-btn active" data-subtab="income">収入</button>
+        <button class="subtab-btn" data-subtab="expense">支出</button>
+        <button class="subtab-btn" data-subtab="fixed">固定費</button>
+      </div>
+
+      <!-- 収入 -->
+      <div class="subtab-panel active" data-subpanel="income">
+        <form id="incomeForm" class="entry-form glass-card">
+          <h2 class="form-title">収入を記録する</h2>
+          <div class="form-group">
+            <label for="incomeName">項目</label>
+            <input type="text" id="incomeName" placeholder="例: 給与" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="incomePrice">金額 (¥)</label>
+              <input type="number" id="incomePrice" placeholder="250000" min="1" required>
+            </div>
+            <div class="form-group half">
+              <label for="incomeDate">日付</label>
+              <input type="date" id="incomeDate" required>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary accent-kakeibo-bg">
+            <span>記録する</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
+          </button>
+        </form>
+        <div class="list-section">
+          <div class="list-header"><h2>今月の収入一覧</h2></div>
+          <div id="incomeList" class="history-list checklist"></div>
+        </div>
+      </div>
+
+      <!-- 支出 -->
+      <div class="subtab-panel" data-subpanel="expense">
+        <form id="expenseForm" class="entry-form glass-card">
+          <h2 class="form-title">支出を記録する</h2>
+          <div class="form-group">
+            <label for="expenseName">項目</label>
+            <input type="text" id="expenseName" placeholder="例: 家賃" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="expensePrice">金額 (¥)</label>
+              <input type="number" id="expensePrice" placeholder="80000" min="1" required>
+            </div>
+            <div class="form-group half">
+              <label for="expenseDate">日付</label>
+              <input type="date" id="expenseDate" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="expenseMethod">決済媒体</label>
+            <select id="expenseMethod"></select>
+          </div>
+          <button type="submit" class="btn-primary accent-kakeibo-bg">
+            <span>記録する</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
+          </button>
+        </form>
+        <div class="list-section">
+          <div class="list-header"><h2>今月の支出一覧（決済媒体ごと）</h2></div>
+          <div id="expenseList" class="history-list checklist"></div>
+        </div>
+      </div>
+
+      <!-- 固定費 -->
+      <div class="subtab-panel" data-subpanel="fixed">
+        <form id="fixedForm" class="entry-form glass-card">
+          <h2 class="form-title">固定費を設定する</h2>
+          <div class="form-group">
+            <label for="fixedType">種別</label>
+            <select id="fixedType">
+              <option value="expense">支出</option>
+              <option value="income">収入</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="fixedName">項目</label>
+            <input type="text" id="fixedName" placeholder="例: 家賃" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="fixedDay">毎月の日にち</label>
+              <input type="number" id="fixedDay" min="1" max="31" placeholder="27" required>
+            </div>
+            <div class="form-group half">
+              <label for="fixedPrice">金額 (¥)</label>
+              <input type="number" id="fixedPrice" min="1" placeholder="80000" required>
+            </div>
+          </div>
+          <div class="form-group" id="fixedMethodWrap">
+            <label for="fixedMethod">決済媒体</label>
+            <select id="fixedMethod"></select>
+          </div>
+          <button type="submit" class="btn-primary accent-kakeibo-bg">
+            <span>固定費を追加</span>
+          </button>
+        </form>
+        <div class="list-section">
+          <div class="list-header"><h2>固定費一覧</h2><p class="hint-text">毎月自動で収入/支出に追加されます</p></div>
+          <div id="fixedList" class="history-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 投資 TAB ============ -->
+    <section class="tab-panel" id="tab-invest" data-tab="invest">
+      <div class="stat-card glass-card accent-invest">
+        <span class="stat-label">累計投資額</span>
+        <div class="stat-amount"><span class="yen">¥</span><span id="investTotal">0</span></div>
+        <div class="invest-breakdown">
+          <div class="invest-chip"><span class="dot dot-tsumitate"></span>NISA(積立) <b id="investTsumitate">¥0</b></div>
+          <div class="invest-chip"><span class="dot dot-seicho"></span>NISA(成長) <b id="investSeicho">¥0</b></div>
+          <div class="invest-chip"><span class="dot dot-ideco"></span>iDeCo <b id="investIdeco">¥0</b></div>
+        </div>
+      </div>
+
+      <div class="subtab-switch">
+        <button class="subtab-btn active" data-subtab="investAdd">記録</button>
+        <button class="subtab-btn" data-subtab="investFixed">固定費</button>
+      </div>
+
+      <div class="subtab-panel active" data-subpanel="investAdd">
+        <form id="investForm" class="entry-form glass-card">
+          <h2 class="form-title">投資を記録する</h2>
+          <div class="form-group">
+            <label for="investCategory">種類</label>
+            <select id="investCategory">
+              <option value="tsumitate">NISA（積立）</option>
+              <option value="seicho">NISA（成長）</option>
+              <option value="ideco">iDeCo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="investName">項目</label>
+            <input type="text" id="investName" placeholder="例: 毎月積立" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="investPrice">金額 (¥)</label>
+              <input type="number" id="investPrice" min="1" placeholder="30000" required>
+            </div>
+            <div class="form-group half">
+              <label for="investDate">日付</label>
+              <input type="date" id="investDate" required>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary accent-invest-bg">
+            <span>記録する</span>
+          </button>
+        </form>
+        <div class="list-section">
+          <div class="list-header"><h2>履歴</h2></div>
+          <div id="investHistory" class="history-list"></div>
+        </div>
+      </div>
+
+      <div class="subtab-panel" data-subpanel="investFixed">
+        <form id="investFixedForm" class="entry-form glass-card">
+          <h2 class="form-title">積立の固定費を設定</h2>
+          <div class="form-group">
+            <label for="investFixedCategory">種類</label>
+            <select id="investFixedCategory">
+              <option value="tsumitate">NISA（積立）</option>
+              <option value="seicho">NISA（成長）</option>
+              <option value="ideco">iDeCo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="investFixedName">項目</label>
+            <input type="text" id="investFixedName" placeholder="例: 毎月積立" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="investFixedDay">毎月の日にち</label>
+              <input type="number" id="investFixedDay" min="1" max="31" placeholder="1" required>
+            </div>
+            <div class="form-group half">
+              <label for="investFixedPrice">金額 (¥)</label>
+              <input type="number" id="investFixedPrice" min="1" placeholder="30000" required>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary accent-invest-bg"><span>固定費を追加</span></button>
+        </form>
+        <div class="list-section">
+          <div class="list-header"><h2>固定費一覧</h2></div>
+          <div id="investFixedList" class="history-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ データ TAB ============ -->
+    <section class="tab-panel" id="tab-data" data-tab="data">
+      <div class="data-summary-grid" id="dataSummaryGrid"></div>
+
+      <div class="glass-card chart-card">
+        <div class="chart-card-header">
+          <h2>月の推移</h2>
+          <select id="chartMetricSelect"></select>
+        </div>
+        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+      </div>
+
+      <div class="glass-card chart-card">
+        <div class="chart-card-header">
+          <h2>我慢強さ</h2>
+          <p class="hint-text">我慢額 ÷ 支出額</p>
+        </div>
+        <div class="chart-wrap"><canvas id="ganmanStrengthChart"></canvas></div>
+      </div>
+
+      <div class="list-section">
+        <div class="list-header">
+          <h2>指標の管理</h2>
+        </div>
+        <div id="metricManageList" class="metric-manage-list"></div>
+        <form id="comboMetricForm" class="entry-form glass-card">
+          <h2 class="form-title">合成指標を追加</h2>
+          <div class="form-group">
+            <label for="comboName">指標名</label>
+            <input type="text" id="comboName" placeholder="例: 貯金＋iDeCo" required>
+          </div>
+          <div class="form-group">
+            <label>合計する指標を選択</label>
+            <div id="comboComponentPicker" class="chip-picker"></div>
+          </div>
+          <button type="submit" class="btn-primary accent-data-bg"><span>合成指標を追加</span></button>
+        </form>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab-target="gaman">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6M12 22c-4-3-7-6.5-7-11a7 7 0 0114 0c0 4.5-3 8-7 11z"/></svg>
+      <span>我慢</span>
+    </button>
+    <button class="nav-btn" data-tab-target="use">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+      <span>使用</span>
+    </button>
+    <button class="nav-btn" data-tab-target="kakeibo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg>
+      <span>家計簿</span>
+    </button>
+    <button class="nav-btn" data-tab-target="invest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8M21 7v6h-6"/></svg>
+      <span>投資</span>
+    </button>
+    <button class="nav-btn" data-tab-target="data">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M8 17V10M13 17V6M18 17v-4"/></svg>
+      <span>データ</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ============ MODAL (edit / confirm) ============ -->
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal glass-card" id="modalContent"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
