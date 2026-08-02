@@ -63,6 +63,10 @@
             <input type="date" id="gamanDate" required>
           </div>
         </div>
+        <div class="form-group">
+          <label for="gamanMemo">メモ</label>
+          <input type="text" id="gamanMemo" placeholder="任意（詳細メモ）">
+        </div>
         <button type="submit" class="btn-primary accent-gaman-bg">
           <span>記録する</span>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
@@ -80,10 +84,15 @@
 
     <!-- ============ 使用 TAB ============ -->
     <section class="tab-panel" id="tab-use" data-tab="use">
+      <div class="month-nav">
+        <button class="month-nav-btn" id="usePrevMonth" aria-label="前の月">‹</button>
+        <div class="month-nav-label" id="useMonthLabel">2026年8月</div>
+        <button class="month-nav-btn" id="useNextMonth" aria-label="次の月">›</button>
+      </div>
       <div class="stat-card glass-card accent-use">
         <div class="stat-grid">
           <div>
-            <span class="stat-label">今月の使用累計</span>
+            <span class="stat-label">使用累計</span>
             <div class="stat-amount small"><span class="yen">¥</span><span id="useMonthTotal">0</span></div>
           </div>
           <div>
@@ -95,7 +104,7 @@
           <div id="useProgressBar" class="progress-fill"></div>
         </div>
         <div class="limit-editor">
-          <label for="useLimitInput">今月の上限目標</label>
+          <label for="useLimitInput">上限目標</label>
           <div class="limit-editor-row">
             <span class="yen">¥</span>
             <input type="number" id="useLimitInput" min="0" placeholder="30000">
@@ -124,6 +133,10 @@
           <label for="useMethod">決済媒体</label>
           <select id="useMethod"></select>
         </div>
+        <div class="form-group">
+          <label for="useMemo">メモ</label>
+          <input type="text" id="useMemo" placeholder="任意（詳細メモ）">
+        </div>
         <button type="submit" class="btn-primary accent-use-bg">
           <span>記録する</span>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
@@ -142,14 +155,19 @@
 
     <!-- ============ 家計簿 TAB ============ -->
     <section class="tab-panel" id="tab-kakeibo" data-tab="kakeibo">
+      <div class="month-nav">
+        <button class="month-nav-btn" id="kakeiboPrevMonth" aria-label="前の月">‹</button>
+        <div class="month-nav-label" id="kakeiboMonthLabel">2026年8月</div>
+        <button class="month-nav-btn" id="kakeiboNextMonth" aria-label="次の月">›</button>
+      </div>
       <div class="stat-card glass-card accent-kakeibo">
         <div class="stat-grid three">
           <div>
-            <span class="stat-label">今月の収入</span>
+            <span class="stat-label">収入</span>
             <div class="stat-amount small plus"><span class="yen">¥</span><span id="kakeiboIncomeTotal">0</span></div>
           </div>
           <div>
-            <span class="stat-label">今月の支出</span>
+            <span class="stat-label">支出</span>
             <div class="stat-amount small minus"><span class="yen">¥</span><span id="kakeiboExpenseTotal">0</span></div>
           </div>
           <div>
@@ -183,13 +201,17 @@
               <input type="date" id="incomeDate" required>
             </div>
           </div>
+          <div class="form-group">
+            <label for="incomeMemo">メモ</label>
+            <input type="text" id="incomeMemo" placeholder="任意（詳細メモ）">
+          </div>
           <button type="submit" class="btn-primary accent-kakeibo-bg">
             <span>記録する</span>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
           </button>
         </form>
         <div class="list-section">
-          <div class="list-header"><h2>今月の収入一覧</h2></div>
+          <div class="list-header"><h2>収入一覧</h2></div>
           <div id="incomeList" class="history-list checklist"></div>
         </div>
       </div>
@@ -216,13 +238,17 @@
             <label for="expenseMethod">決済媒体</label>
             <select id="expenseMethod"></select>
           </div>
+          <div class="form-group">
+            <label for="expenseMemo">メモ</label>
+            <input type="text" id="expenseMemo" placeholder="任意（詳細メモ）">
+          </div>
           <button type="submit" class="btn-primary accent-kakeibo-bg">
             <span>記録する</span>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4V20M4 12H20"/></svg>
           </button>
         </form>
         <div class="list-section">
-          <div class="list-header"><h2>今月の支出一覧（決済媒体ごと）</h2></div>
+          <div class="list-header"><h2>支出一覧（決済媒体ごと）</h2></div>
           <div id="expenseList" class="history-list checklist"></div>
         </div>
       </div>
@@ -256,12 +282,28 @@
             <label for="fixedMethod">決済媒体</label>
             <select id="fixedMethod"></select>
           </div>
+          <div class="form-group">
+            <label for="fixedMemo">メモ</label>
+            <input type="text" id="fixedMemo" placeholder="例: 契約プラン、更新月など">
+          </div>
+          <div class="form-group checkbox-group" id="fixedSubWrap">
+            <label class="checkbox-label">
+              <input type="checkbox" id="fixedIsSub">
+              <span>サブスクとして管理する（オプション料金を追加できます）</span>
+            </label>
+          </div>
+          <div id="fixedOptionsWrap" class="options-wrap hidden">
+            <label>オプション</label>
+            <div id="fixedOptionsList" class="options-list"></div>
+            <button type="button" id="fixedAddOptionBtn" class="btn-text">＋ オプションを追加</button>
+            <div class="options-total">基本料金＋オプション合計：<span id="fixedOptionsTotalDisplay">¥0</span></div>
+          </div>
           <button type="submit" class="btn-primary accent-kakeibo-bg">
             <span>固定費を追加</span>
           </button>
         </form>
         <div class="list-section">
-          <div class="list-header"><h2>固定費一覧</h2><p class="hint-text">毎月自動で収入/支出に追加されます</p></div>
+          <div class="list-header"><h2>固定費一覧</h2><p class="hint-text">毎月自動で収入/支出に追加されます・タップで編集</p></div>
           <div id="fixedList" class="history-list"></div>
         </div>
       </div>
@@ -309,6 +351,10 @@
               <input type="date" id="investDate" required>
             </div>
           </div>
+          <div class="form-group">
+            <label for="investMemo">メモ</label>
+            <input type="text" id="investMemo" placeholder="任意（詳細メモ）">
+          </div>
           <button type="submit" class="btn-primary accent-invest-bg">
             <span>記録する</span>
           </button>
@@ -343,6 +389,10 @@
               <label for="investFixedPrice">金額 (¥)</label>
               <input type="number" id="investFixedPrice" min="1" placeholder="30000" required>
             </div>
+          </div>
+          <div class="form-group">
+            <label for="investFixedMemo">メモ</label>
+            <input type="text" id="investFixedMemo" placeholder="任意（詳細メモ）">
           </div>
           <button type="submit" class="btn-primary accent-invest-bg"><span>固定費を追加</span></button>
         </form>

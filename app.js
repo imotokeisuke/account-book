@@ -24,6 +24,7 @@ const KEYS = {
 };
 
 const CATEGORY_LABEL = { tsumitate: 'NISA（積立）', seicho: 'NISA（成長）', ideco: 'iDeCo' };
+const DEFAULT_CREDIT_NAMES = ['PayPay', '楽天', 'UFJ'];
 
 const currencyFormatter = new Intl.NumberFormat('ja-JP');
 const fmt = n => currencyFormatter.format(Math.round(n || 0));
@@ -42,6 +43,11 @@ const escapeHTML = str => String(str).replace(/[&<>'"]/g, t => ({
 const formatMonthLabel = ym => {
   const [y, m] = ym.split('-');
   return `${y}年${parseInt(m, 10)}月`;
+};
+const addMonths = (ym, delta) => {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 };
 
 function load(key, fallback) {
@@ -63,7 +69,20 @@ function save(key, value) {
 let gamanData = load(KEYS.gaman, []);
 let useData = load(KEYS.use, []);
 let useLimits = load(KEYS.useLimits, {});
-let paymentMethods = load(KEYS.methods, ['現金', 'PayPay', '楽天', 'UFJ']);
+
+// 決済媒体: 旧形式（文字列配列）からの移行に対応
+function loadPaymentMethods() {
+  const raw = load(KEYS.methods, null);
+  if (!raw || raw.length === 0) {
+    return ['現金', 'PayPay', '楽天', 'UFJ'].map(name => ({ name, credit: DEFAULT_CREDIT_NAMES.includes(name) }));
+  }
+  if (typeof raw[0] === 'string') {
+    return raw.map(name => ({ name, credit: DEFAULT_CREDIT_NAMES.includes(name) }));
+  }
+  return raw;
+}
+let paymentMethods = loadPaymentMethods();
+
 let incomeData = load(KEYS.income, []);
 let expenseData = load(KEYS.expense, []);
 let fixedCosts = load(KEYS.fixed, []);
@@ -71,6 +90,9 @@ let investData = load(KEYS.invest, []);
 let investFixed = load(KEYS.investFixed, []);
 let metricsConfig = load(KEYS.metricsConfig, { custom: [], hiddenBase: [] });
 let appTitle = load(KEYS.appTitle, '家計簿');
+
+let useViewMonth = currentMonthKey();
+let kakeiboViewMonth = currentMonthKey();
 
 function saveAll() {
   save(KEYS.gaman, gamanData);
@@ -84,6 +106,22 @@ function saveAll() {
   save(KEYS.investFixed, investFixed);
   save(KEYS.metricsConfig, metricsConfig);
   save(KEYS.appTitle, appTitle);
+}
+
+function isCreditMethod(methodName) {
+  const pm = paymentMethods.find(p => p.name === methodName);
+  return pm ? !!pm.credit : false;
+}
+// 使用タブの記録がクレジット決済媒体の場合、家計簿上は「使用月の翌月」の支出として計上する
+function settlementMonthOf(item) {
+  return isCreditMethod(item.method) ? addMonths(monthKeyOf(item.date), 1) : monthKeyOf(item.date);
+}
+function settlementDateOf(item) {
+  const sm = settlementMonthOf(item);
+  if (sm === monthKeyOf(item.date)) return item.date;
+  const [y, m] = sm.split('-').map(Number);
+  const day = Math.min(parseInt(item.date.split('-')[2], 10), daysInMonth(y, m));
+  return `${sm}-${pad2(day)}`;
 }
 
 /* ---------------------------------------------------------
@@ -125,10 +163,10 @@ function openModal(html) {
   modalOverlay.classList.add('open');
 }
 
-// 汎用: 項目編集モーダル（項目名・金額・日付 [・決済媒体]）
-function openEditItemModal({ title, name, price, date, method, onSave, onDelete }) {
+// 汎用: 項目編集モーダル（項目名・金額・日付・メモ [・決済媒体]）
+function openEditItemModal({ title, name, price, date, method, memo, onSave, onDelete }) {
   const methodOptions = method !== undefined
-    ? `<div class="form-group"><label>決済媒体</label><select id="mf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m)}" ${m === method ? 'selected' : ''}>${escapeHTML(m)}</option>`).join('')}</select></div>`
+    ? `<div class="form-group"><label>決済媒体</label><select id="mf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('')}</select></div>`
     : '';
   openModal(`
     <h3>${escapeHTML(title)}</h3>
@@ -138,6 +176,7 @@ function openEditItemModal({ title, name, price, date, method, onSave, onDelete 
       <div class="form-group half"><label>日付</label><input type="date" id="mf_date" value="${date}"></div>
     </div>
     ${methodOptions}
+    <div class="form-group"><label>メモ</label><input type="text" id="mf_memo" value="${escapeHTML(memo || '')}" placeholder="任意"></div>
     <div class="modal-actions">
       <button class="btn-danger" id="mf_delete">削除</button>
       <button class="btn-primary accent-gaman-bg" id="mf_save"><span>保存</span></button>
@@ -149,7 +188,8 @@ function openEditItemModal({ title, name, price, date, method, onSave, onDelete 
     const newDate = document.getElementById('mf_date').value;
     if (!newName || !newPrice || !newDate) return;
     const newMethod = method !== undefined ? document.getElementById('mf_method').value : undefined;
-    onSave({ name: newName, price: newPrice, date: newDate, method: newMethod });
+    const newMemo = document.getElementById('mf_memo').value.trim();
+    onSave({ name: newName, price: newPrice, date: newDate, method: newMethod, memo: newMemo });
     closeModal();
   });
   document.getElementById('mf_delete').addEventListener('click', () => {
@@ -175,11 +215,15 @@ function ensureFixedCostsGenerated() {
     if (!log.includes(logKey)) {
       const day = Math.min(parseInt(fc.day, 10), lastDay);
       const dateStr = `${ym}-${pad2(day)}`;
-      const entry = { id: genId(), name: fc.name, price: fc.price, date: dateStr, checked: false, fixedId: fc.id };
+      const amount = fc.type === 'expense' ? (fc.totalPrice != null ? fc.totalPrice : fc.price) : fc.price;
+      const entry = {
+        id: genId(), name: fc.name, price: amount, date: dateStr, checked: false, fixedId: fc.id,
+        memo: fc.memo || '', isSubscription: !!fc.isSubscription, options: fc.options || []
+      };
       if (fc.type === 'income') {
         incomeData.push(entry);
       } else {
-        entry.method = fc.method || paymentMethods[0];
+        entry.method = fc.method || (paymentMethods[0] && paymentMethods[0].name);
         expenseData.push(entry);
       }
       log.push(logKey);
@@ -192,7 +236,7 @@ function ensureFixedCostsGenerated() {
     if (!log.includes(logKey)) {
       const day = Math.min(parseInt(fc.day, 10), lastDay);
       const dateStr = `${ym}-${pad2(day)}`;
-      investData.push({ id: genId(), category: fc.category, name: fc.name, price: fc.price, date: dateStr, fixedId: fc.id });
+      investData.push({ id: genId(), category: fc.category, name: fc.name, price: fc.price, date: dateStr, fixedId: fc.id, memo: fc.memo || '' });
       log.push(logKey);
       changed = true;
     }
@@ -215,11 +259,13 @@ gamanForm.addEventListener('submit', e => {
   const name = document.getElementById('gamanName').value.trim();
   const price = parseInt(document.getElementById('gamanPrice').value, 10);
   const date = document.getElementById('gamanDate').value;
+  const memo = document.getElementById('gamanMemo').value.trim();
   if (!name || !price || !date) return;
-  gamanData.push({ id: genId(), name, price, date });
+  gamanData.push({ id: genId(), name, price, date, memo });
   saveAll();
   document.getElementById('gamanName').value = '';
   document.getElementById('gamanPrice').value = '';
+  document.getElementById('gamanMemo').value = '';
   renderGamanTab();
   renderDataTabIfActive();
 });
@@ -254,12 +300,14 @@ function renderHistoryGrouped(container, items, { onItemClick, priceClass = null
     wrap.className = 'month-group';
     const listHTML = group.items.map(item => {
       const meta = renderMeta ? renderMeta(item) : `<div class="item-meta">${item.date}</div>`;
+      const memoHTML = item.memo ? `<div class="item-memo">${escapeHTML(item.memo)}</div>` : '';
       const pc = priceClass ? priceClass(item) : '';
       return `
         <li class="history-item" data-id="${item.id}">
           <div class="item-info">
             <div class="item-name">${escapeHTML(item.name)}</div>
             ${meta}
+            ${memoHTML}
           </div>
           <div class="item-price ${pc}">¥${fmt(item.price)}</div>
         </li>`;
@@ -285,9 +333,10 @@ function renderGamanTab() {
       if (!item) return;
       openEditItemModal({
         title: '我慢の記録を編集',
-        name: item.name, price: item.price, date: item.date,
+        name: item.name, price: item.price, date: item.date, memo: item.memo,
         onSave: v => {
           Object.assign(item, v);
+          delete item.method;
           saveAll();
           renderGamanTab();
           renderDataTabIfActive();
@@ -315,8 +364,8 @@ function refreshMethodSelects() {
     const sel = document.getElementById(id);
     if (!sel) return;
     const prev = sel.value;
-    sel.innerHTML = paymentMethods.map(m => `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`).join('');
-    if (paymentMethods.includes(prev)) sel.value = prev;
+    sel.innerHTML = paymentMethods.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('');
+    if (paymentMethods.some(m => m.name === prev)) sel.value = prev;
   });
 }
 refreshMethodSelects();
@@ -328,7 +377,7 @@ document.getElementById('editMethodsBtn').addEventListener('click', () => {
 function openMethodsModal() {
   const renderList = () => paymentMethods.map((m, idx) => `
     <div class="metric-manage-item">
-      <span>${escapeHTML(m)}</span>
+      <span>${escapeHTML(m.name)} ${m.credit ? '<span class="credit-tag">翌月請求</span>' : ''}</span>
       <button class="del-metric" data-idx="${idx}" ${paymentMethods.length <= 1 ? 'disabled' : ''}>削除</button>
     </div>`).join('');
   openModal(`
@@ -340,6 +389,9 @@ function openMethodsModal() {
         <input type="text" id="newMethodInput" placeholder="例: 交通系IC">
         <button class="btn-small" id="addMethodBtn">追加</button>
       </div>
+    </div>
+    <div class="form-group checkbox-group">
+      <label class="checkbox-label"><input type="checkbox" id="newMethodCredit"><span>クレジットカード（使用した月の翌月に支出として計上）</span></label>
     </div>
     <div class="modal-actions"><button class="btn-primary accent-use-bg" id="methodsCloseBtn"><span>閉じる</span></button></div>
   `);
@@ -359,11 +411,13 @@ function openMethodsModal() {
   document.getElementById('addMethodBtn').addEventListener('click', () => {
     const input = document.getElementById('newMethodInput');
     const val = input.value.trim();
-    if (!val || paymentMethods.includes(val)) return;
-    paymentMethods.push(val);
+    if (!val || paymentMethods.some(m => m.name === val)) return;
+    const credit = document.getElementById('newMethodCredit').checked;
+    paymentMethods.push({ name: val, credit });
     saveAll();
     refreshMethodSelects();
     input.value = '';
+    document.getElementById('newMethodCredit').checked = false;
     rerender();
   });
   document.getElementById('methodsCloseBtn').addEventListener('click', closeModal);
@@ -375,11 +429,13 @@ useForm.addEventListener('submit', e => {
   const price = parseInt(document.getElementById('usePrice').value, 10);
   const date = document.getElementById('useDate').value;
   const method = document.getElementById('useMethod').value;
+  const memo = document.getElementById('useMemo').value.trim();
   if (!name || !price || !date) return;
-  useData.push({ id: genId(), name, price, date, method });
+  useData.push({ id: genId(), name, price, date, method, memo });
   saveAll();
   document.getElementById('useName').value = '';
   document.getElementById('usePrice').value = '';
+  document.getElementById('useMemo').value = '';
   renderUseTab();
   renderKakeiboTab();
   renderDataTabIfActive();
@@ -398,17 +454,20 @@ document.querySelector('[data-clear="use"]').addEventListener('click', () => {
 document.getElementById('saveLimitBtn').addEventListener('click', () => {
   const val = parseInt(document.getElementById('useLimitInput').value, 10);
   if (!val || val < 0) return;
-  useLimits[currentMonthKey()] = val;
+  useLimits[useViewMonth] = val;
   saveAll();
   renderUseTab();
 });
+
+document.getElementById('usePrevMonth').addEventListener('click', () => { useViewMonth = addMonths(useViewMonth, -1); renderUseTab(); });
+document.getElementById('useNextMonth').addEventListener('click', () => { useViewMonth = addMonths(useViewMonth, 1); renderUseTab(); });
 
 function openUseEditModal(id) {
   const item = useData.find(i => i.id === id);
   if (!item) return;
   openEditItemModal({
     title: '使用の記録を編集',
-    name: item.name, price: item.price, date: item.date, method: item.method,
+    name: item.name, price: item.price, date: item.date, method: item.method, memo: item.memo,
     onSave: v => {
       Object.assign(item, v);
       saveAll();
@@ -427,16 +486,17 @@ function openUseEditModal(id) {
 }
 
 function renderUseTab() {
-  const ym = currentMonthKey();
-  const monthTotal = useData.filter(i => monthKeyOf(i.date) === ym).reduce((s, i) => s + i.price, 0);
+  document.getElementById('useMonthLabel').textContent = formatMonthLabel(useViewMonth);
+  const ym = useViewMonth;
+  const monthItems = useData.filter(i => monthKeyOf(i.date) === ym);
+  const monthTotal = monthItems.reduce((s, i) => s + i.price, 0);
   const limit = useLimits[ym] || 0;
   const remaining = limit - monthTotal;
 
   document.getElementById('useMonthTotal').textContent = fmt(monthTotal);
-  document.getElementById('useRemaining').textContent = fmt(Math.abs(remaining));
-  const remWrap = document.getElementById('useRemainingWrap');
-  remWrap.querySelector('#useRemaining').style.color = remaining < 0 ? 'var(--danger)' : 'var(--success)';
-  if (remaining < 0) document.getElementById('useRemaining').textContent = '-' + fmt(Math.abs(remaining));
+  const remEl = document.getElementById('useRemaining');
+  remEl.textContent = (remaining < 0 ? '-' : '') + fmt(Math.abs(remaining));
+  remEl.style.color = remaining < 0 ? 'var(--danger)' : 'var(--success)';
 
   const pct = limit > 0 ? Math.min(100, (monthTotal / limit) * 100) : 0;
   const bar = document.getElementById('useProgressBar');
@@ -445,9 +505,9 @@ function renderUseTab() {
 
   document.getElementById('useLimitInput').value = limit || '';
 
-  renderHistoryGrouped(document.getElementById('useHistory'), useData, {
+  renderHistoryGrouped(document.getElementById('useHistory'), monthItems, {
     onItemClick: openUseEditModal,
-    renderMeta: item => `<div class="item-meta">${item.date}<span class="method-tag">${escapeHTML(item.method || '')}</span></div>`
+    renderMeta: item => `<div class="item-meta">${item.date}<span class="method-tag">${escapeHTML(item.method || '')}</span>${isCreditMethod(item.method) ? '<span class="credit-tag">翌月請求</span>' : ''}</div>`
   });
 }
 
@@ -462,11 +522,13 @@ document.getElementById('incomeForm').addEventListener('submit', e => {
   const name = document.getElementById('incomeName').value.trim();
   const price = parseInt(document.getElementById('incomePrice').value, 10);
   const date = document.getElementById('incomeDate').value;
+  const memo = document.getElementById('incomeMemo').value.trim();
   if (!name || !price || !date) return;
-  incomeData.push({ id: genId(), name, price, date, checked: false });
+  incomeData.push({ id: genId(), name, price, date, checked: false, memo });
   saveAll();
   document.getElementById('incomeName').value = '';
   document.getElementById('incomePrice').value = '';
+  document.getElementById('incomeMemo').value = '';
   renderKakeiboTab();
   renderDataTabIfActive();
 });
@@ -477,17 +539,72 @@ document.getElementById('expenseForm').addEventListener('submit', e => {
   const price = parseInt(document.getElementById('expensePrice').value, 10);
   const date = document.getElementById('expenseDate').value;
   const method = document.getElementById('expenseMethod').value;
+  const memo = document.getElementById('expenseMemo').value.trim();
   if (!name || !price || !date) return;
-  expenseData.push({ id: genId(), name, price, date, method, checked: false });
+  expenseData.push({ id: genId(), name, price, date, method, checked: false, memo });
   saveAll();
   document.getElementById('expenseName').value = '';
   document.getElementById('expensePrice').value = '';
+  document.getElementById('expenseMemo').value = '';
   renderKakeiboTab();
   renderDataTabIfActive();
 });
 
+document.getElementById('kakeiboPrevMonth').addEventListener('click', () => { kakeiboViewMonth = addMonths(kakeiboViewMonth, -1); renderKakeiboTab(); });
+document.getElementById('kakeiboNextMonth').addEventListener('click', () => { kakeiboViewMonth = addMonths(kakeiboViewMonth, 1); renderKakeiboTab(); });
+
+/* ---- 固定費フォーム（メモ・サブスク・オプション） ---- */
+let fixedOptionsState = [];
+
+function updateFixedOptionsTotal() {
+  const base = parseInt(document.getElementById('fixedPrice').value, 10) || 0;
+  const optSum = fixedOptionsState.reduce((s, o) => s + (o.price || 0), 0);
+  document.getElementById('fixedOptionsTotalDisplay').textContent = '¥' + fmt(base + optSum);
+}
+function renderFixedOptionsList() {
+  const wrap = document.getElementById('fixedOptionsList');
+  wrap.innerHTML = fixedOptionsState.map(opt => `
+    <div class="option-row" data-id="${opt.id}">
+      <input type="text" class="opt-name" placeholder="例: 4Kオプション" value="${escapeHTML(opt.name)}">
+      <input type="number" class="opt-price" placeholder="500" min="0" value="${opt.price || ''}">
+      <button type="button" class="remove-option" data-id="${opt.id}">×</button>
+    </div>`).join('');
+  wrap.querySelectorAll('.opt-name').forEach(inp => inp.addEventListener('input', e => {
+    const id = e.target.closest('.option-row').dataset.id;
+    const opt = fixedOptionsState.find(o => o.id === id);
+    if (opt) opt.name = e.target.value;
+  }));
+  wrap.querySelectorAll('.opt-price').forEach(inp => inp.addEventListener('input', e => {
+    const id = e.target.closest('.option-row').dataset.id;
+    const opt = fixedOptionsState.find(o => o.id === id);
+    if (opt) opt.price = parseInt(e.target.value, 10) || 0;
+    updateFixedOptionsTotal();
+  }));
+  wrap.querySelectorAll('.remove-option').forEach(btn => btn.addEventListener('click', () => {
+    fixedOptionsState = fixedOptionsState.filter(o => o.id !== btn.dataset.id);
+    renderFixedOptionsList();
+    updateFixedOptionsTotal();
+  }));
+}
+document.getElementById('fixedAddOptionBtn').addEventListener('click', () => {
+  fixedOptionsState.push({ id: genId(), name: '', price: 0 });
+  renderFixedOptionsList();
+});
+document.getElementById('fixedPrice').addEventListener('input', updateFixedOptionsTotal);
+document.getElementById('fixedIsSub').addEventListener('change', e => {
+  document.getElementById('fixedOptionsWrap').classList.toggle('hidden', !e.target.checked);
+  updateFixedOptionsTotal();
+});
 document.getElementById('fixedType').addEventListener('change', e => {
-  document.getElementById('fixedMethodWrap').style.display = e.target.value === 'expense' ? 'flex' : 'none';
+  const isExpense = e.target.value === 'expense';
+  document.getElementById('fixedMethodWrap').style.display = isExpense ? 'flex' : 'none';
+  document.getElementById('fixedSubWrap').style.display = isExpense ? 'flex' : 'none';
+  if (!isExpense) {
+    document.getElementById('fixedIsSub').checked = false;
+    document.getElementById('fixedOptionsWrap').classList.add('hidden');
+    fixedOptionsState = [];
+    renderFixedOptionsList();
+  }
 });
 
 document.getElementById('fixedForm').addEventListener('submit', e => {
@@ -495,15 +612,28 @@ document.getElementById('fixedForm').addEventListener('submit', e => {
   const type = document.getElementById('fixedType').value;
   const name = document.getElementById('fixedName').value.trim();
   const day = parseInt(document.getElementById('fixedDay').value, 10);
-  const price = parseInt(document.getElementById('fixedPrice').value, 10);
+  const basePrice = parseInt(document.getElementById('fixedPrice').value, 10);
   const method = document.getElementById('fixedMethod').value;
-  if (!name || !day || !price) return;
-  fixedCosts.push({ id: genId(), type, name, day, price, method: type === 'expense' ? method : undefined });
+  const memo = document.getElementById('fixedMemo').value.trim();
+  const isSub = type === 'expense' && document.getElementById('fixedIsSub').checked;
+  const options = isSub ? fixedOptionsState.filter(o => o.name.trim()).map(o => ({ id: o.id, name: o.name.trim(), price: o.price || 0 })) : [];
+  if (!name || !day || !basePrice) return;
+  const totalPrice = basePrice + options.reduce((s, o) => s + o.price, 0);
+  fixedCosts.push({
+    id: genId(), type, name, day, price: basePrice, totalPrice, memo,
+    isSubscription: isSub, options, method: type === 'expense' ? method : undefined
+  });
   saveAll();
   ensureFixedCostsGenerated();
   document.getElementById('fixedName').value = '';
   document.getElementById('fixedDay').value = '';
   document.getElementById('fixedPrice').value = '';
+  document.getElementById('fixedMemo').value = '';
+  document.getElementById('fixedIsSub').checked = false;
+  document.getElementById('fixedOptionsWrap').classList.add('hidden');
+  fixedOptionsState = [];
+  renderFixedOptionsList();
+  updateFixedOptionsTotal();
   renderKakeiboTab();
   renderDataTabIfActive();
 });
@@ -512,7 +642,7 @@ function openIncomeEditModal(id) {
   const item = incomeData.find(i => i.id === id);
   if (!item) return;
   openEditItemModal({
-    title: '収入を編集', name: item.name, price: item.price, date: item.date,
+    title: '収入を編集', name: item.name, price: item.price, date: item.date, memo: item.memo,
     onSave: v => { Object.assign(item, v); saveAll(); renderKakeiboTab(); renderDataTabIfActive(); },
     onDelete: () => { incomeData = incomeData.filter(i => i.id !== id); saveAll(); renderKakeiboTab(); renderDataTabIfActive(); }
   });
@@ -521,16 +651,129 @@ function openExpenseEditModal(id) {
   const item = expenseData.find(i => i.id === id);
   if (!item) return;
   openEditItemModal({
-    title: '支出を編集', name: item.name, price: item.price, date: item.date, method: item.method,
+    title: '支出を編集', name: item.name, price: item.price, date: item.date, method: item.method, memo: item.memo,
     onSave: v => { Object.assign(item, v); saveAll(); renderKakeiboTab(); renderDataTabIfActive(); },
     onDelete: () => { expenseData = expenseData.filter(i => i.id !== id); saveAll(); renderKakeiboTab(); renderDataTabIfActive(); }
   });
 }
 
-function renderCheckableList(container, items, onToggle, onClick, metaFn) {
+/* ---- 固定費 編集モーダル（メモ・サブスク・オプション対応） ---- */
+function openFixedCostEditModal(fc) {
+  const isExpense = fc.type === 'expense';
+  let optionsState = (fc.options || []).map(o => ({ ...o }));
+
+  const methodOptions = isExpense
+    ? `<div class="form-group"><label>決済媒体</label><select id="fmf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === fc.method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('')}</select></div>`
+    : '';
+  const subToggle = isExpense ? `
+    <div class="form-group checkbox-group">
+      <label class="checkbox-label"><input type="checkbox" id="fmf_isSub" ${fc.isSubscription ? 'checked' : ''}><span>サブスクとして管理する</span></label>
+    </div>
+    <div id="fmf_optionsWrap" class="options-wrap ${fc.isSubscription ? '' : 'hidden'}">
+      <label>オプション</label>
+      <div id="fmf_optionsList" class="options-list"></div>
+      <button type="button" id="fmf_addOptionBtn" class="btn-text">＋ オプションを追加</button>
+      <div class="options-total">基本料金＋オプション合計：<span id="fmf_optionsTotalDisplay">¥0</span></div>
+    </div>` : '';
+
+  openModal(`
+    <h3>固定費を編集</h3>
+    <div class="form-group"><label>項目</label><input type="text" id="fmf_name" value="${escapeHTML(fc.name)}"></div>
+    <div class="form-row">
+      <div class="form-group half"><label>毎月の日にち</label><input type="number" id="fmf_day" min="1" max="31" value="${fc.day}"></div>
+      <div class="form-group half"><label>基本料金 (¥)</label><input type="number" id="fmf_price" min="1" value="${fc.price}"></div>
+    </div>
+    ${methodOptions}
+    <div class="form-group"><label>メモ</label><input type="text" id="fmf_memo" value="${escapeHTML(fc.memo || '')}"></div>
+    ${subToggle}
+    <div class="modal-actions">
+      <button class="btn-danger" id="fmf_delete">削除</button>
+      <button class="btn-primary accent-kakeibo-bg" id="fmf_save"><span>保存</span></button>
+    </div>
+  `);
+
+  function renderOptRows() {
+    const wrap = document.getElementById('fmf_optionsList');
+    if (!wrap) return;
+    wrap.innerHTML = optionsState.map(opt => `
+      <div class="option-row" data-id="${opt.id}">
+        <input type="text" class="fmf-opt-name" value="${escapeHTML(opt.name)}" placeholder="オプション名">
+        <input type="number" class="fmf-opt-price" value="${opt.price || ''}" placeholder="金額" min="0">
+        <button type="button" class="remove-option" data-id="${opt.id}">×</button>
+      </div>`).join('');
+    wrap.querySelectorAll('.fmf-opt-name').forEach(inp => inp.addEventListener('input', e => {
+      const id = e.target.closest('.option-row').dataset.id;
+      const opt = optionsState.find(o => o.id === id);
+      if (opt) opt.name = e.target.value;
+    }));
+    wrap.querySelectorAll('.fmf-opt-price').forEach(inp => inp.addEventListener('input', e => {
+      const id = e.target.closest('.option-row').dataset.id;
+      const opt = optionsState.find(o => o.id === id);
+      if (opt) opt.price = parseInt(e.target.value, 10) || 0;
+      updateTotal();
+    }));
+    wrap.querySelectorAll('.remove-option').forEach(btn => btn.addEventListener('click', () => {
+      optionsState = optionsState.filter(o => o.id !== btn.dataset.id);
+      renderOptRows();
+      updateTotal();
+    }));
+  }
+  function updateTotal() {
+    const disp = document.getElementById('fmf_optionsTotalDisplay');
+    if (!disp) return;
+    const base = parseInt(document.getElementById('fmf_price').value, 10) || 0;
+    const sum = optionsState.reduce((s, o) => s + (o.price || 0), 0);
+    disp.textContent = '¥' + fmt(base + sum);
+  }
+  if (isExpense) {
+    renderOptRows();
+    updateTotal();
+    document.getElementById('fmf_isSub').addEventListener('change', e => {
+      document.getElementById('fmf_optionsWrap').classList.toggle('hidden', !e.target.checked);
+    });
+    document.getElementById('fmf_addOptionBtn').addEventListener('click', () => {
+      optionsState.push({ id: genId(), name: '', price: 0 });
+      renderOptRows();
+    });
+    document.getElementById('fmf_price').addEventListener('input', updateTotal);
+  }
+
+  document.getElementById('fmf_save').addEventListener('click', () => {
+    const name = document.getElementById('fmf_name').value.trim();
+    const day = parseInt(document.getElementById('fmf_day').value, 10);
+    const price = parseInt(document.getElementById('fmf_price').value, 10);
+    if (!name || !day || !price) return;
+    fc.name = name;
+    fc.day = day;
+    fc.price = price;
+    fc.memo = document.getElementById('fmf_memo').value.trim();
+    if (isExpense) {
+      fc.method = document.getElementById('fmf_method').value;
+      fc.isSubscription = document.getElementById('fmf_isSub').checked;
+      fc.options = fc.isSubscription ? optionsState.filter(o => o.name.trim()) : [];
+      fc.totalPrice = price + fc.options.reduce((s, o) => s + (o.price || 0), 0);
+    } else {
+      fc.totalPrice = price;
+    }
+    saveAll();
+    renderKakeiboTab();
+    renderDataTabIfActive();
+    closeModal();
+  });
+  document.getElementById('fmf_delete').addEventListener('click', () => {
+    if (confirm('この固定費を削除しますか？（今月以降、自動追加されなくなります）')) {
+      fixedCosts = fixedCosts.filter(f => f.id !== fc.id);
+      saveAll();
+      renderKakeiboTab();
+      closeModal();
+    }
+  });
+}
+
+function renderCheckableList(container, items, onToggle, onClick) {
   container.innerHTML = '';
   if (items.length === 0) {
-    container.innerHTML = `<div class="empty-state">今月の記録はまだありません。</div>`;
+    container.innerHTML = `<div class="empty-state">この月の記録はまだありません。</div>`;
     return;
   }
   items.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -538,14 +781,21 @@ function renderCheckableList(container, items, onToggle, onClick, metaFn) {
     const row = document.createElement('div');
     row.className = 'checklist-row';
     const linked = item.linked ? `<span class="linked-tag">使用</span>` : '';
+    const credit = item.linked && isCreditMethod(item.method) ? `<span class="credit-tag">翌月請求分</span>` : '';
+    const sub = item.isSubscription ? `<span class="sub-tag">サブスク</span>` : '';
+    const memoHTML = item.memo ? `<div class="item-memo">${escapeHTML(item.memo)}</div>` : '';
+    const optionsHTML = item.isSubscription && item.options && item.options.length
+      ? `<div class="fixed-options-breakdown">${item.options.map(o => `+ ${escapeHTML(o.name)} ¥${fmt(o.price)}`).join('<br>')}</div>` : '';
     row.innerHTML = `
       <div class="check-toggle ${item.checked ? 'checked' : ''}" data-id="${item.id}" data-linked="${!!item.linked}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
       </div>
       <div class="history-item" data-id="${item.id}" data-linked="${!!item.linked}">
         <div class="item-info">
-          <div class="item-name">${escapeHTML(item.name)} ${linked}</div>
-          <div class="item-meta">${item.date}${metaFn ? metaFn(item) : ''}</div>
+          <div class="item-name">${escapeHTML(item.name)} ${linked}${credit}${sub}</div>
+          <div class="item-meta">${item.date}</div>
+          ${memoHTML}
+          ${optionsHTML}
         </div>
         <div class="item-price">¥${fmt(item.price)}</div>
       </div>`;
@@ -561,10 +811,12 @@ function renderCheckableList(container, items, onToggle, onClick, metaFn) {
 }
 
 function renderKakeiboTab() {
-  const ym = currentMonthKey();
+  document.getElementById('kakeiboMonthLabel').textContent = formatMonthLabel(kakeiboViewMonth);
+  const ym = kakeiboViewMonth;
   const monthIncome = incomeData.filter(i => monthKeyOf(i.date) === ym);
   const monthExpenseManual = expenseData.filter(i => monthKeyOf(i.date) === ym);
-  const monthUse = useData.filter(i => monthKeyOf(i.date) === ym);
+  // クレジット決済の使用記録は「使用月の翌月」を家計簿上の支出月として扱う
+  const monthUse = useData.filter(i => settlementMonthOf(i) === ym);
 
   const incomeTotal = monthIncome.reduce((s, i) => s + i.price, 0);
   const expenseTotal = monthExpenseManual.reduce((s, i) => s + i.price, 0) + monthUse.reduce((s, i) => s + i.price, 0);
@@ -592,15 +844,15 @@ function renderKakeiboTab() {
   const expenseWrap = document.getElementById('expenseList');
   expenseWrap.innerHTML = '';
   if (combined.length === 0) {
-    expenseWrap.innerHTML = `<div class="empty-state">今月の支出はまだありません。</div>`;
+    expenseWrap.innerHTML = `<div class="empty-state">この月の支出はまだありません。</div>`;
   } else {
-    paymentMethods.forEach(method => {
-      const items = combined.filter(i => (i.method || '') === method).sort((a, b) => new Date(a.date) - new Date(b.date));
+    paymentMethods.forEach(m => {
+      const items = combined.filter(i => (i.method || '') === m.name).sort((a, b) => new Date(a.date) - new Date(b.date));
       if (items.length === 0) return;
       const subtotal = items.reduce((s, i) => s + i.price, 0);
       const groupWrap = document.createElement('div');
       groupWrap.className = 'month-group';
-      groupWrap.innerHTML = `<div class="method-group-title"><span>${escapeHTML(method)}</span><span>¥${fmt(subtotal)}</span></div>`;
+      groupWrap.innerHTML = `<div class="method-group-title"><span>${escapeHTML(m.name)}${m.credit ? ' <span class="credit-tag">翌月請求</span>' : ''}</span><span>¥${fmt(subtotal)}</span></div>`;
       const list = document.createElement('div');
       list.className = 'history-list';
       groupWrap.appendChild(list);
@@ -611,7 +863,8 @@ function renderKakeiboTab() {
       );
       expenseWrap.appendChild(groupWrap);
     });
-    const noMethod = combined.filter(i => !i.method);
+    const knownNames = paymentMethods.map(m => m.name);
+    const noMethod = combined.filter(i => !i.method || !knownNames.includes(i.method));
     if (noMethod.length) {
       const groupWrap = document.createElement('div');
       groupWrap.className = 'month-group';
@@ -626,29 +879,28 @@ function renderKakeiboTab() {
     }
   }
 
-  // 固定費一覧
+  // 固定費一覧（月に依存せず全件表示）
   const fixedWrap = document.getElementById('fixedList');
   fixedWrap.innerHTML = '';
   if (fixedCosts.length === 0) {
     fixedWrap.innerHTML = `<div class="empty-state">固定費はまだ設定されていません。</div>`;
   } else {
     fixedCosts.forEach(fc => {
+      const displayPrice = fc.type === 'expense' ? (fc.totalPrice != null ? fc.totalPrice : fc.price) : fc.price;
+      const subInfo = fc.isSubscription && fc.options && fc.options.length
+        ? `<div class="fixed-options-breakdown">${fc.options.map(o => `+ ${escapeHTML(o.name)} ¥${fmt(o.price)}`).join('<br>')}</div>` : '';
       const row = document.createElement('div');
       row.className = 'history-item';
       row.innerHTML = `
         <div class="item-info">
-          <div class="item-name">${escapeHTML(fc.name)} <span class="method-tag">${fc.type === 'income' ? '収入' : '支出'}</span></div>
+          <div class="item-name">${escapeHTML(fc.name)} <span class="method-tag">${fc.type === 'income' ? '収入' : '支出'}</span>${fc.isSubscription ? '<span class="sub-tag">サブスク</span>' : ''}</div>
           <div class="item-meta">毎月${fc.day}日${fc.method ? ' ・ ' + escapeHTML(fc.method) : ''}</div>
+          ${fc.memo ? `<div class="item-memo">${escapeHTML(fc.memo)}</div>` : ''}
+          ${subInfo}
         </div>
-        <div class="item-price ${fc.type === 'income' ? 'plus' : 'minus'}">¥${fmt(fc.price)}</div>`;
+        <div class="item-price ${fc.type === 'income' ? 'plus' : 'minus'}">¥${fmt(displayPrice)}</div>`;
       row.style.cursor = 'pointer';
-      row.addEventListener('click', () => {
-        if (confirm('この固定費を削除しますか？（今月以降、自動追加されなくなります）')) {
-          fixedCosts = fixedCosts.filter(f => f.id !== fc.id);
-          saveAll();
-          renderKakeiboTab();
-        }
-      });
+      row.addEventListener('click', () => openFixedCostEditModal(fc));
       fixedWrap.appendChild(row);
     });
   }
@@ -665,11 +917,13 @@ document.getElementById('investForm').addEventListener('submit', e => {
   const name = document.getElementById('investName').value.trim();
   const price = parseInt(document.getElementById('investPrice').value, 10);
   const date = document.getElementById('investDate').value;
+  const memo = document.getElementById('investMemo').value.trim();
   if (!name || !price || !date) return;
-  investData.push({ id: genId(), category, name, price, date });
+  investData.push({ id: genId(), category, name, price, date, memo });
   saveAll();
   document.getElementById('investName').value = '';
   document.getElementById('investPrice').value = '';
+  document.getElementById('investMemo').value = '';
   renderInvestTab();
   renderDataTabIfActive();
 });
@@ -680,13 +934,15 @@ document.getElementById('investFixedForm').addEventListener('submit', e => {
   const name = document.getElementById('investFixedName').value.trim();
   const day = parseInt(document.getElementById('investFixedDay').value, 10);
   const price = parseInt(document.getElementById('investFixedPrice').value, 10);
+  const memo = document.getElementById('investFixedMemo').value.trim();
   if (!name || !day || !price) return;
-  investFixed.push({ id: genId(), category, name, day, price });
+  investFixed.push({ id: genId(), category, name, day, price, memo });
   saveAll();
   ensureFixedCostsGenerated();
   document.getElementById('investFixedName').value = '';
   document.getElementById('investFixedDay').value = '';
   document.getElementById('investFixedPrice').value = '';
+  document.getElementById('investFixedMemo').value = '';
   renderInvestTab();
   renderDataTabIfActive();
 });
@@ -696,8 +952,8 @@ function openInvestEditModal(id) {
   if (!item) return;
   openEditItemModal({
     title: `投資記録を編集（${CATEGORY_LABEL[item.category]}）`,
-    name: item.name, price: item.price, date: item.date,
-    onSave: v => { Object.assign(item, v); saveAll(); renderInvestTab(); renderDataTabIfActive(); },
+    name: item.name, price: item.price, date: item.date, memo: item.memo,
+    onSave: v => { Object.assign(item, v); delete item.method; saveAll(); renderInvestTab(); renderDataTabIfActive(); },
     onDelete: () => { investData = investData.filter(i => i.id !== id); saveAll(); renderInvestTab(); renderDataTabIfActive(); }
   });
 }
@@ -728,6 +984,7 @@ function renderInvestTab() {
         <div class="item-info">
           <div class="item-name">${escapeHTML(fc.name)} <span class="method-tag">${CATEGORY_LABEL[fc.category]}</span></div>
           <div class="item-meta">毎月${fc.day}日</div>
+          ${fc.memo ? `<div class="item-memo">${escapeHTML(fc.memo)}</div>` : ''}
         </div>
         <div class="item-price">¥${fmt(fc.price)}</div>`;
       row.style.cursor = 'pointer';
@@ -759,7 +1016,8 @@ function incomeAsOf(cutoff) {
 }
 function expenseAsOf(cutoff) {
   const manual = expenseData.filter(i => i.date <= cutoff).reduce((s, i) => s + i.price, 0);
-  const used = useData.filter(i => i.date <= cutoff).reduce((s, i) => s + i.price, 0);
+  // クレジット決済分は引き落とし日（使用月の翌月）ベースで計上する
+  const used = useData.filter(i => settlementDateOf(i) <= cutoff).reduce((s, i) => s + i.price, 0);
   return manual + used;
 }
 function savingsAsOf(cutoff) {
@@ -817,7 +1075,6 @@ function renderDataTab() {
   const cutoff = todayStr();
   const metrics = getAllMetrics();
 
-  // サマリーカード
   const grid = document.getElementById('dataSummaryGrid');
   grid.innerHTML = metrics.map(m => `
     <div class="metric-card ${m.key === 'total_assets' ? 'wide' : ''}">
@@ -825,7 +1082,6 @@ function renderDataTab() {
       <div class="stat-amount"><span class="yen">¥</span>${fmt(getMetricValueAsOf(m.key, cutoff))}</div>
     </div>`).join('');
 
-  // 指標セレクト
   const select = document.getElementById('chartMetricSelect');
   const prevVal = select.value;
   select.innerHTML = metrics.map(m => `<option value="${m.key}">${escapeHTML(m.label)}</option>`).join('');
@@ -868,15 +1124,15 @@ function renderTrendChart(metricKey) {
   });
 }
 
+// 我慢強さ＝その月の我慢額 ÷ その月の支出額（同一月・使用日ベースで算出。決済のタイミングはずらさない）
 function renderStrengthChart() {
   if (typeof Chart === 'undefined') return;
   const months = lastNMonthKeys(6);
   const labels = months.map(m => m.slice(5) + '月');
   const values = months.map(m => {
-    const [y, mo] = m.split('-').map(Number);
-    const lastDay = daysInMonth(y, mo);
     const start = `${m}-01`;
-    const end = `${m}-${pad2(lastDay)}`;
+    const [y, mo] = m.split('-').map(Number);
+    const end = `${m}-${pad2(daysInMonth(y, mo))}`;
     const monthGaman = gamanData.filter(i => i.date >= start && i.date <= end).reduce((s, i) => s + i.price, 0);
     const monthExpense = expenseData.filter(i => i.date >= start && i.date <= end).reduce((s, i) => s + i.price, 0)
       + useData.filter(i => i.date >= start && i.date <= end).reduce((s, i) => s + i.price, 0);
@@ -928,7 +1184,6 @@ function renderMetricManageUI(metrics) {
     });
   });
 
-  // 合成指標の部品ピッカー
   const picker = document.getElementById('comboComponentPicker');
   picker.innerHTML = metrics.map(m => `<div class="chip-option" data-key="${m.key}">${escapeHTML(m.label)}</div>`).join('');
   const selected = new Set();
@@ -990,7 +1245,6 @@ function init() {
   renderInvestTab();
 }
 
-// PWA: register service worker for fast reloads (best-effort)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
