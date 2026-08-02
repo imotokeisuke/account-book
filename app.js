@@ -19,6 +19,7 @@ const KEYS = {
   invest: 'investData',
   investFixed: 'investFixed',
   metricsConfig: 'metricsConfig',
+  creditGroupChecks: 'creditGroupChecks',
   appTitle: 'appTitle',
   fixedLog: 'generatedFixedLog'
 };
@@ -89,6 +90,7 @@ let fixedCosts = load(KEYS.fixed, []);
 let investData = load(KEYS.invest, []);
 let investFixed = load(KEYS.investFixed, []);
 let metricsConfig = load(KEYS.metricsConfig, { custom: [], hiddenBase: [] });
+let creditGroupChecks = load(KEYS.creditGroupChecks, {});
 let appTitle = load(KEYS.appTitle, '家計簿');
 
 let useViewMonth = currentMonthKey();
@@ -105,6 +107,7 @@ function saveAll() {
   save(KEYS.invest, investData);
   save(KEYS.investFixed, investFixed);
   save(KEYS.metricsConfig, metricsConfig);
+  save(KEYS.creditGroupChecks, creditGroupChecks);
   save(KEYS.appTitle, appTitle);
 }
 
@@ -202,10 +205,12 @@ function openEditItemModal({ title, name, price, date, method, memo, onSave, onD
 
 /* ---------------------------------------------------------
    4. 固定費の自動反映
+   - 家計簿の固定費は「表示中の月」に応じて生成する（支出日を迎えていなくても
+     その月の記録として計上されるように、月を移動するたびに生成される）
+   - 投資の固定費はこれまで通り実際の当月のみ生成する
 --------------------------------------------------------- */
-function ensureFixedCostsGenerated() {
+function ensureKakeiboFixedForMonth(ym) {
   const log = load(KEYS.fixedLog, []);
-  const ym = currentMonthKey();
   const [y, m] = ym.split('-').map(Number);
   const lastDay = daysInMonth(y, m);
   let changed = false;
@@ -230,6 +235,19 @@ function ensureFixedCostsGenerated() {
       changed = true;
     }
   });
+
+  if (changed) {
+    saveAll();
+    save(KEYS.fixedLog, log);
+  }
+}
+
+function ensureInvestFixedGenerated() {
+  const log = load(KEYS.fixedLog, []);
+  const ym = currentMonthKey();
+  const [y, m] = ym.split('-').map(Number);
+  const lastDay = daysInMonth(y, m);
+  let changed = false;
 
   investFixed.forEach(fc => {
     const logKey = `i_${fc.id}_${ym}`;
@@ -624,8 +642,7 @@ document.getElementById('fixedForm').addEventListener('submit', e => {
     isSubscription: isSub, options, method: type === 'expense' ? method : undefined
   });
   saveAll();
-  ensureFixedCostsGenerated();
-  document.getElementById('fixedName').value = '';
+  ensureKakeiboFixedForMonth(kakeiboViewMonth);
   document.getElementById('fixedDay').value = '';
   document.getElementById('fixedPrice').value = '';
   document.getElementById('fixedMemo').value = '';
@@ -810,9 +827,43 @@ function renderCheckableList(container, items, onToggle, onClick) {
   });
 }
 
+// クレジット系（決済媒体の credit フラグが true）のグループは、項目ごとではなく
+// 媒体ごとに1つのチェックボックスを表示する（明細行はチェックなしの単純な行として表示）
+function renderPlainList(container, items, onClick) {
+  container.innerHTML = '';
+  if (items.length === 0) return;
+  items.sort((a, b) => new Date(a.date) - new Date(b.date));
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-item plain-row';
+    const linked = item.linked ? `<span class="linked-tag">使用</span>` : '';
+    const sub = item.isSubscription ? `<span class="sub-tag">サブスク</span>` : '';
+    const memoHTML = item.memo ? `<div class="item-memo">${escapeHTML(item.memo)}</div>` : '';
+    const optionsHTML = item.isSubscription && item.options && item.options.length
+      ? `<div class="fixed-options-breakdown">${item.options.map(o => `+ ${escapeHTML(o.name)} ¥${fmt(o.price)}`).join('<br>')}</div>` : '';
+    row.dataset.id = item.id;
+    row.dataset.linked = !!item.linked;
+    row.innerHTML = `
+      <div class="item-info">
+        <div class="item-name">${escapeHTML(item.name)} ${linked}${sub}</div>
+        <div class="item-meta">${item.date}</div>
+        ${memoHTML}
+        ${optionsHTML}
+      </div>
+      <div class="item-price">¥${fmt(item.price)}</div>`;
+    container.appendChild(row);
+  });
+  container.querySelectorAll('.plain-row').forEach(el => {
+    el.addEventListener('click', () => onClick(el.dataset.id, el.dataset.linked === 'true'));
+  });
+}
+
 function renderKakeiboTab() {
   document.getElementById('kakeiboMonthLabel').textContent = formatMonthLabel(kakeiboViewMonth);
   const ym = kakeiboViewMonth;
+  // 固定費は支出日（設定した「毎月の日にち」）を迎えていなくても、表示中の月の記録として計上する
+  ensureKakeiboFixedForMonth(ym);
+
   const monthIncome = incomeData.filter(i => monthKeyOf(i.date) === ym);
   const monthExpenseManual = expenseData.filter(i => monthKeyOf(i.date) === ym);
   // クレジット決済の使用記録は「使用月の翌月」を家計簿上の支出月として扱う
@@ -828,7 +879,7 @@ function renderKakeiboTab() {
   balEl.textContent = (balance < 0 ? '-' : '') + fmt(Math.abs(balance));
   balEl.style.color = balance < 0 ? 'var(--danger)' : 'var(--success)';
 
-  // 収入一覧
+  // 収入一覧（チェックボックスは「自分で金額を反映したか」を確認するための個別チェック）
   renderCheckableList(
     document.getElementById('incomeList'),
     monthIncome.map(i => ({ ...i })),
@@ -852,16 +903,41 @@ function renderKakeiboTab() {
       const subtotal = items.reduce((s, i) => s + i.price, 0);
       const groupWrap = document.createElement('div');
       groupWrap.className = 'month-group';
-      groupWrap.innerHTML = `<div class="method-group-title"><span>${escapeHTML(m.name)}${m.credit ? ' <span class="credit-tag">翌月請求</span>' : ''}</span><span>¥${fmt(subtotal)}</span></div>`;
       const list = document.createElement('div');
       list.className = 'history-list';
-      groupWrap.appendChild(list);
-      renderCheckableList(
-        list, items,
-        id => { const it = expenseData.find(i => i.id === id); if (it) { it.checked = !it.checked; saveAll(); renderKakeiboTab(); } },
-        (id, isLinked) => { if (isLinked) openUseEditModal(id); else openExpenseEditModal(id); }
-      );
-      expenseWrap.appendChild(groupWrap);
+
+      if (m.credit) {
+        // 媒体ごとに1つのチェックボックス（引き落とし額を確認したかどうか）
+        const groupKey = `${m.name}_${ym}`;
+        const groupChecked = !!creditGroupChecks[groupKey];
+        groupWrap.innerHTML = `
+          <div class="method-group-title credit-group">
+            <div class="method-group-left">
+              <div class="check-toggle group-check ${groupChecked ? 'checked' : ''}" data-groupkey="${groupKey}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              </div>
+              <span>${escapeHTML(m.name)} <span class="credit-tag">翌月請求</span></span>
+            </div>
+            <span>¥${fmt(subtotal)}</span>
+          </div>`;
+        groupWrap.appendChild(list);
+        renderPlainList(list, items, (id, isLinked) => { if (isLinked) openUseEditModal(id); else openExpenseEditModal(id); });
+        expenseWrap.appendChild(groupWrap);
+        groupWrap.querySelector('.group-check').addEventListener('click', () => {
+          creditGroupChecks[groupKey] = !creditGroupChecks[groupKey];
+          saveAll();
+          renderKakeiboTab();
+        });
+      } else {
+        groupWrap.innerHTML = `<div class="method-group-title"><span>${escapeHTML(m.name)}</span><span>¥${fmt(subtotal)}</span></div>`;
+        groupWrap.appendChild(list);
+        renderCheckableList(
+          list, items,
+          id => { const it = expenseData.find(i => i.id === id); if (it) { it.checked = !it.checked; saveAll(); renderKakeiboTab(); } },
+          (id, isLinked) => { if (isLinked) openUseEditModal(id); else openExpenseEditModal(id); }
+        );
+        expenseWrap.appendChild(groupWrap);
+      }
     });
     const knownNames = paymentMethods.map(m => m.name);
     const noMethod = combined.filter(i => !i.method || !knownNames.includes(i.method));
@@ -938,7 +1014,7 @@ document.getElementById('investFixedForm').addEventListener('submit', e => {
   if (!name || !day || !price) return;
   investFixed.push({ id: genId(), category, name, day, price, memo });
   saveAll();
-  ensureFixedCostsGenerated();
+  ensureInvestFixedGenerated();
   document.getElementById('investFixedName').value = '';
   document.getElementById('investFixedDay').value = '';
   document.getElementById('investFixedPrice').value = '';
@@ -1237,7 +1313,7 @@ document.getElementById('editTitleBtn').addEventListener('click', () => {
    11. 初期化
 --------------------------------------------------------- */
 function init() {
-  ensureFixedCostsGenerated();
+  ensureInvestFixedGenerated();
   refreshMethodSelects();
   renderGamanTab();
   renderUseTab();

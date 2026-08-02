@@ -80,7 +80,7 @@ body {
 .icon-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.12); }
 
 /* ---------- Main / Tabs ---------- */
-.app-main { flex: 1; padding: 8px 16px calc(var(--nav-h) + 24px); }
+.app-main { flex: 1; padding: 8px 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 28px); }
 .tab-panel { display: none; flex-direction: column; gap: 16px; animation: fadeIn 0.35s ease; }
 .tab-panel.active { display: flex; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -201,7 +201,12 @@ input[type="date"] { color-scheme: dark; }
 
 .empty-state { text-align: center; padding: 30px 10px; color: var(--text-faint); font-size: 0.88rem; }
 
-.method-group-title { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; padding: 2px 4px; display: flex; justify-content: space-between; }
+.method-group-title { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; padding: 2px 4px; display: flex; justify-content: space-between; align-items: center; }
+.method-group-title.credit-group { padding: 6px 4px; }
+.method-group-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.method-group-left .group-check { width: 20px; height: 20px; flex-shrink: 0; }
+.method-group-left span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plain-row { cursor: pointer; }
 
 /* ---------- Month nav ---------- */
 .month-nav {
