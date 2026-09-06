@@ -1,10 +1,11 @@
-const CACHE_NAME = 'kakeibo-cache-v3';
+const CACHE_NAME = 'kakeibo-cache-v4';
 const APP_SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './manifest.json',
+  './vendor/chart.umd.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
