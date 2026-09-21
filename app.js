@@ -502,7 +502,7 @@ function openGrowthSettingsModal() {
 
   openModal(`
     <h3>育成の設定</h3>
-    <p class="hint-text">累計我慢金額に応じて表示が変化します。段階・金額・アイコンは自由に編集できます。</p>
+    <p class="hint-text">今月の我慢金額に応じて表示が変化します（毎月リセットされます）。段階・金額・アイコンは自由に編集できます。</p>
     <div id="stagesListWrap" class="metric-manage-list">${renderList()}</div>
     <div id="stageFormWrap">${formHTML()}</div>
     <div class="modal-actions"><button class="btn-text" id="growthCloseBtn">閉じる</button></div>
@@ -566,20 +566,22 @@ function renderGamanTab() {
   const total = gamanData.reduce((s, i) => s + i.price, 0);
   document.getElementById('gamanTotal').textContent = fmt(total);
 
-  // 育成ビジュアル
-  const { stage, next, pct } = getGrowthInfo(total);
-  document.getElementById('growthEmoji').innerHTML = iconSvg(stage.iconId);
-  document.getElementById('growthLabel').textContent = stage.label;
-  document.getElementById('growthSub').textContent = next
-    ? `次の「${next.label}」まであと¥${fmt(next.min - total)}`
-    : '最高段階に到達しました！';
-  document.getElementById('growthProgressBar').style.width = pct + '%';
-
-  // 先月との比較
+  // 今月の我慢額（育成ビジュアルは毎月リセットされ、今月分の金額のみで判定する）
   const thisMonth = currentMonthKey();
   const lastMonth = addMonths(thisMonth, -1);
   const thisMonthTotal = gamanData.filter(i => monthKeyOf(i.date) === thisMonth).reduce((s, i) => s + i.price, 0);
   const lastMonthTotal = gamanData.filter(i => monthKeyOf(i.date) === lastMonth).reduce((s, i) => s + i.price, 0);
+
+  // 育成ビジュアル（今月の我慢額ベース）
+  const { stage, next, pct } = getGrowthInfo(thisMonthTotal);
+  document.getElementById('growthEmoji').innerHTML = iconSvg(stage.iconId);
+  document.getElementById('growthLabel').textContent = stage.label;
+  document.getElementById('growthSub').textContent = next
+    ? `次の「${next.label}」まであと¥${fmt(next.min - thisMonthTotal)}（今月分）`
+    : '今月、最高段階に到達しました！';
+  document.getElementById('growthProgressBar').style.width = pct + '%';
+
+  // 先月との比較
   const diff = thisMonthTotal - lastMonthTotal;
   const compareEl = document.getElementById('gamanMonthCompare');
   if (lastMonthTotal === 0 && thisMonthTotal === 0) {
