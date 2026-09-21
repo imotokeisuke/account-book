@@ -391,31 +391,47 @@ function renderHistoryGrouped(container, items, { onItemClick, priceClass = null
   }
 }
 
-// 節約のモチベーション：累計我慢金額に応じて変化する「人類の進化」ビジュアル
+// 節約のモチベーション：累計我慢金額に応じて変化する「進化」ビジュアル
+// プランクトン→魚→トカゲ→犬→猿→人間→ゴジラ、と具体的な生き物の変化で表現。
 // アイコンは SVG のプリセットから選択、金額のしきい値・ラベルは自由に編集可能（growthStages に保存）
 const ICON_LIBRARY = {
-  crouch: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="60" r="9"/><path d="M24 69 L62 52"/><path d="M28 66 L18 88"/><path d="M62 52 L56 88"/><path d="M62 52 L74 86"/></svg>',
-  hunch: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="30" cy="38" r="9"/><path d="M30 47 L54 58"/><path d="M34 50 L22 80"/><path d="M40 52 L48 42"/><path d="M54 58 L46 88"/><path d="M54 58 L64 84"/></svg>',
-  semi: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="38" cy="24" r="9"/><path d="M38 33 L48 64"/><path d="M40 40 L27 56"/><path d="M44 40 L57 53"/><path d="M48 64 L40 90"/><path d="M48 64 L58 88"/></svg>',
-  upright: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="17" r="9"/><path d="M50 26 L50 62"/><path d="M50 35 L35 54"/><path d="M50 35 L65 54"/><path d="M50 62 L42 90"/><path d="M50 62 L58 90"/></svg>',
-  stand: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 60"/><path d="M50 30 L38 55"/><path d="M50 30 L62 55"/><path d="M50 60 L44 90"/><path d="M50 60 L56 90"/></svg>',
-  triumph: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 58"/><path d="M50 28 L67 12"/><path d="M50 28 L40 50"/><path d="M50 58 L44 88"/><path d="M50 58 L56 88"/></svg>',
-  victory: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 58"/><path d="M50 28 L67 10"/><path d="M50 28 L33 10"/><path d="M50 58 L44 88"/><path d="M50 58 L56 88"/></svg>'
+  plankton: '<svg viewBox="0 0 100 100" fill="currentColor"><ellipse cx="50" cy="55" rx="20" ry="16"/><circle cx="43" cy="50" r="3" fill="#fdf8f0"/><path d="M30 42 Q20 30 14 34" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M68 42 Q78 30 84 34" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M34 68 Q24 80 18 78" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M66 68 Q76 80 82 78" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M50 36 Q46 24 50 16" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>',
+  fish: '<svg viewBox="0 0 100 100" fill="currentColor"><path d="M18 50 Q35 24 66 34 Q82 40 88 50 Q82 60 66 66 Q35 76 18 50 Z"/><path d="M14 50 L0 34 L0 66 Z"/><circle cx="62" cy="43" r="3.5" fill="#fdf8f0"/><path d="M48 34 L54 20 L62 34 Z" opacity="0.9"/></svg>',
+  lizard: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 55 Q35 40 52 48 Q68 55 82 46"/><path d="M82 46 Q94 40 97 28"/><path d="M34 60 L27 78"/><path d="M44 62 L39 80"/><path d="M60 60 L66 78"/><path d="M70 56 L78 74"/><circle cx="16" cy="55" r="1" fill="currentColor"/></svg>',
+  dog: '<svg viewBox="0 0 100 100" fill="currentColor"><ellipse cx="46" cy="58" rx="26" ry="15"/><circle cx="74" cy="44" r="13"/><path d="M66 33 L60 20 L71 29 Z"/><path d="M80 32 L88 20 L83 32 Z"/><path d="M20 58 L13 76" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M32 65 L28 82" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M56 66 L54 82" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M66 62 L70 80" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M22 48 Q8 40 12 28" stroke="currentColor" stroke-width="6" fill="none" stroke-linecap="round"/></svg>',
+  monkey: '<svg viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="32" r="15"/><circle cx="35" cy="26" r="6"/><circle cx="65" cy="26" r="6"/><ellipse cx="50" cy="64" rx="19" ry="21"/><path d="M32 58 Q16 64 16 80" stroke="currentColor" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M68 58 Q84 64 84 80" stroke="currentColor" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M40 83 L37 96" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M60 83 L63 96" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>',
+  human: '<svg viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="20" r="10.5"/><path d="M38 34 h24 a6 6 0 016 6 v18 a6 6 0 01-6 6 h-24 a6 6 0 01-6-6 v-18 a6 6 0 016-6 z"/><path d="M35 39 L20 58" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M65 39 L80 58" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M43 64 L37 94" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><path d="M57 64 L63 94" stroke="currentColor" stroke-width="9" stroke-linecap="round"/></svg>',
+  godzilla: '<svg viewBox="0 0 100 100" fill="currentColor"><ellipse cx="48" cy="62" rx="24" ry="26"/><path d="M65 70 Q88 78 92 95" stroke="currentColor" stroke-width="12" fill="none" stroke-linecap="round"/><circle cx="42" cy="30" r="14"/><path d="M32 20 L27 8 L38 16 Z"/><path d="M43 15 L43 3 L52 12 Z"/><path d="M53 18 L58 6 L64 17 Z"/><path d="M28 34 L20 42" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M56 34 L64 42" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M35 84 L28 98" stroke="currentColor" stroke-width="10" stroke-linecap="round"/><path d="M58 86 L66 99" stroke="currentColor" stroke-width="10" stroke-linecap="round"/></svg>'
 };
-const ICON_ORDER = ['crouch', 'hunch', 'semi', 'upright', 'stand', 'triumph', 'victory'];
+const ICON_ORDER = ['plankton', 'fish', 'lizard', 'dog', 'monkey', 'human', 'godzilla'];
 
 function defaultGrowthStages() {
   return [
-    { id: genId(), min: 0, iconId: 'crouch', label: 'スタート' },
-    { id: genId(), min: 1000, iconId: 'hunch', label: '一歩ずつ' },
-    { id: genId(), min: 10000, iconId: 'semi', label: '前進中' },
-    { id: genId(), min: 50000, iconId: 'upright', label: '自立' },
-    { id: genId(), min: 200000, iconId: 'stand', label: '堂々' },
-    { id: genId(), min: 500000, iconId: 'triumph', label: '達成' },
-    { id: genId(), min: 1000000, iconId: 'victory', label: '頂点' }
+    { id: genId(), min: 0, iconId: 'plankton', label: 'プランクトン' },
+    { id: genId(), min: 1000, iconId: 'fish', label: '魚' },
+    { id: genId(), min: 10000, iconId: 'lizard', label: 'トカゲ' },
+    { id: genId(), min: 50000, iconId: 'dog', label: '犬' },
+    { id: genId(), min: 200000, iconId: 'monkey', label: '猿' },
+    { id: genId(), min: 500000, iconId: 'human', label: '人間' },
+    { id: genId(), min: 1000000, iconId: 'godzilla', label: 'ゴジラ' }
   ];
 }
-let growthStages = load(KEYS.growthStages, null) || defaultGrowthStages();
+
+// 旧デザイン（人型のみ）からの移行: アイコンIDを新セットへ置き換え、
+// ラベルが旧デフォルトのまま（未編集）であれば新しいラベルに更新する。ユーザーが編集済みのラベルはそのまま残す。
+const OLD_TO_NEW_ICON = { crouch: 'plankton', hunch: 'fish', semi: 'lizard', upright: 'dog', stand: 'monkey', triumph: 'human', victory: 'godzilla' };
+const OLD_DEFAULT_LABEL_BY_ICON = { crouch: 'スタート', hunch: '一歩ずつ', semi: '前進中', upright: '自立', stand: '堂々', triumph: '達成', victory: '頂点' };
+function migrateGrowthStages(stages) {
+  return stages.map(s => {
+    const newIcon = OLD_TO_NEW_ICON[s.iconId];
+    if (!newIcon) return s;
+    const wasDefaultLabel = OLD_DEFAULT_LABEL_BY_ICON[s.iconId] === s.label;
+    const defaults = defaultGrowthStages().find(d => d.iconId === newIcon);
+    return { ...s, iconId: newIcon, label: wasDefaultLabel && defaults ? defaults.label : s.label };
+  });
+}
+const loadedGrowthStages = load(KEYS.growthStages, null);
+let growthStages = loadedGrowthStages ? migrateGrowthStages(loadedGrowthStages) : defaultGrowthStages();
 
 function sortedGrowthStages() {
   return [...growthStages].sort((a, b) => a.min - b.min);
@@ -432,14 +448,14 @@ function getGrowthInfo(total) {
   return { stage, next, pct };
 }
 function iconSvg(iconId) {
-  return ICON_LIBRARY[iconId] || ICON_LIBRARY.crouch;
+  return ICON_LIBRARY[iconId] || ICON_LIBRARY.plankton;
 }
 
 document.getElementById('editGrowthBtn').addEventListener('click', () => openGrowthSettingsModal());
 
 function openGrowthSettingsModal() {
   let editingId = null;
-  let selectedIcon = 'crouch';
+  let selectedIcon = 'plankton';
 
   const renderList = () => sortedGrowthStages().map(s => `
     <div class="metric-manage-item">
@@ -515,7 +531,7 @@ function openGrowthSettingsModal() {
       rerender();
     });
     const cancelBtn = document.getElementById('cancelEditStageBtn');
-    if (cancelBtn) cancelBtn.addEventListener('click', () => { editingId = null; selectedIcon = 'crouch'; rerender(); });
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { editingId = null; selectedIcon = 'plankton'; rerender(); });
   }
 
   function rerender() {
@@ -534,7 +550,7 @@ function openGrowthSettingsModal() {
       btn.addEventListener('click', () => {
         editingId = btn.dataset.id;
         const s = growthStages.find(g => g.id === editingId);
-        selectedIcon = s ? s.iconId : 'crouch';
+        selectedIcon = s ? s.iconId : 'plankton';
         rerender();
       });
     });
