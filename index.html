@@ -48,12 +48,17 @@
       </div>
 
       <div class="glass-card growth-card">
-        <div class="growth-visual">
-          <div class="growth-emoji" id="growthEmoji">🌰</div>
-          <div class="growth-info">
-            <div class="growth-label" id="growthLabel">たね</div>
-            <div class="growth-sub" id="growthSub">我慢を記録して育てよう</div>
+        <div class="growth-card-header">
+          <div class="growth-visual">
+            <div class="growth-emoji" id="growthEmoji"></div>
+            <div class="growth-info">
+              <div class="growth-label" id="growthLabel">スタート</div>
+              <div class="growth-sub" id="growthSub">我慢を記録して育てよう</div>
+            </div>
           </div>
+          <button id="editGrowthBtn" class="icon-btn" aria-label="育成の設定を編集">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
         </div>
         <div class="progress-track"><div class="progress-fill growth-fill" id="growthProgressBar"></div></div>
         <p class="stat-sub" id="gamanMonthCompare"></p>

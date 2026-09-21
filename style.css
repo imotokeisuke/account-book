@@ -247,12 +247,28 @@ input[type="date"] { color-scheme: light; }
 
 /* ---------- Gaman growth card ---------- */
 .growth-card { display: flex; flex-direction: column; gap: 10px; }
-.growth-visual { display: flex; align-items: center; gap: 14px; }
-.growth-emoji { font-size: 2.6rem; line-height: 1; flex-shrink: 0; }
+.growth-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.growth-visual { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.growth-emoji { width: 48px; height: 48px; flex-shrink: 0; color: var(--primary); }
+.growth-emoji svg { width: 100%; height: 100%; display: block; }
 .growth-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .growth-label { font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700; color: var(--text-main); }
 .growth-sub { font-size: 0.78rem; color: var(--text-muted); }
 .growth-fill { background: linear-gradient(90deg, var(--accent), #8fc187); }
+
+.icon-grid-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.icon-grid-option {
+  width: 46px; height: 46px; border: 1px solid var(--card-border); border-radius: 10px; padding: 7px;
+  cursor: pointer; background: var(--surface-1); color: var(--text-muted); transition: var(--transition);
+}
+.icon-grid-option svg { width: 100%; height: 100%; display: block; }
+.icon-grid-option.selected { border-color: var(--primary); background: var(--primary-glow); color: var(--primary); }
+.growth-stage-row { display: flex; align-items: center; gap: 10px; }
+.growth-stage-row .stage-icon-preview { width: 30px; height: 30px; flex-shrink: 0; color: var(--primary); }
+.growth-stage-row .stage-icon-preview svg { width: 100%; height: 100%; display: block; }
+.growth-stage-row .stage-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.growth-stage-row .stage-info .stage-name { font-size: 0.85rem; font-weight: 600; color: var(--text-main); }
+.growth-stage-row .stage-info .stage-amount { font-size: 0.72rem; color: var(--text-muted); }
 
 /* ---------- Subtabs ---------- */
 .subtab-switch { display: flex; gap: 8px; background: var(--surface-1); border-radius: var(--radius-sm); padding: 4px; }

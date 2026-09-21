@@ -20,6 +20,7 @@ const KEYS = {
   investFixed: 'investFixed',
   metricsConfig: 'metricsConfig',
   creditGroupChecks: 'creditGroupChecks',
+  growthStages: 'growthStages',
   appTitle: 'appTitle',
   fixedLog: 'generatedFixedLog'
 };
@@ -124,6 +125,7 @@ function saveAll() {
   save(KEYS.investFixed, investFixed);
   save(KEYS.metricsConfig, metricsConfig);
   save(KEYS.creditGroupChecks, creditGroupChecks);
+  save(KEYS.growthStages, growthStages);
   save(KEYS.appTitle, appTitle);
 }
 
@@ -140,19 +142,23 @@ function methodSettlementLabel(pm) {
   if (pm.closingMode === 'custom' && pm.closingDay) return `${pm.closingDay}日締め`;
   return '月末締め';
 }
-// 使用タブの記録がクレジット決済媒体の場合、締め日設定に応じて家計簿上の計上月を決める
-// - 月末締め: 使用月の翌月に計上（例: 9月使用 → 10月払い）
-// - 日付指定（締め日D）: 使用日が D 以前ならその月の翌月、D を過ぎていれば翌々月に計上
-//   （例: 締め日15日の場合、8/16〜9/15の利用はすべて10月払い）
-function settlementMonthOf(item) {
+// 使用タブの記録がクレジット決済媒体の場合、締め日設定に応じて「どの月分の利用か（利用計上月）」を決める
+// - 月末締め: 利用した月がそのまま計上月（支払いはその翌月）
+// - 日付指定（締め日D）: 利用日が D 以前ならその月が計上月、D を過ぎていれば翌月が計上月
+//   （例: 締め日15日の場合、8/16〜9/15の利用は「9月分」、9/16の利用は「10月分」）
+function usageAttributionMonthOf(item) {
   const pm = methodConfigOf(item.method);
   if (!pm || !pm.credit) return monthKeyOf(item.date);
   if (pm.closingMode === 'custom' && pm.closingDay) {
     const d = parseInt(item.date.split('-')[2], 10);
     const D = parseInt(pm.closingDay, 10);
-    return addMonths(monthKeyOf(item.date), d <= D ? 1 : 2);
+    return addMonths(monthKeyOf(item.date), d <= D ? 0 : 1);
   }
-  return addMonths(monthKeyOf(item.date), 1);
+  return monthKeyOf(item.date);
+}
+// 家計簿上の支出計上月（実際の引き落とし月）＝利用計上月の翌月
+function settlementMonthOf(item) {
+  return addMonths(usageAttributionMonthOf(item), 1);
 }
 function settlementDateOf(item) {
   const sm = settlementMonthOf(item);
@@ -160,6 +166,13 @@ function settlementDateOf(item) {
   const [y, m] = sm.split('-').map(Number);
   const day = Math.min(parseInt(item.date.split('-')[2], 10), daysInMonth(y, m));
   return `${sm}-${pad2(day)}`;
+}
+function usageAttributionDateOf(item) {
+  const am = usageAttributionMonthOf(item);
+  if (am === monthKeyOf(item.date)) return item.date;
+  const [y, m] = am.split('-').map(Number);
+  const day = Math.min(parseInt(item.date.split('-')[2], 10), daysInMonth(y, m));
+  return `${am}-${pad2(day)}`;
 }
 
 /* ---------------------------------------------------------
@@ -332,15 +345,16 @@ document.querySelector('[data-clear="gaman"]').addEventListener('click', () => {
   }
 });
 
-function renderHistoryGrouped(container, items, { onItemClick, priceClass = null, renderMeta = null } = {}) {
+function renderHistoryGrouped(container, items, { onItemClick, priceClass = null, renderMeta = null, groupKeyFn = null } = {}) {
   container.innerHTML = '';
   if (items.length === 0) {
     container.innerHTML = `<div class="empty-state">まだ記録がありません。</div>`;
     return;
   }
+  const keyFn = groupKeyFn || (item => monthKeyOf(item.date));
   const groups = {};
   items.forEach(item => {
-    const key = monthKeyOf(item.date);
+    const key = keyFn(item);
     if (!groups[key]) groups[key] = { items: [], total: 0 };
     groups[key].items.push(item);
     groups[key].total += item.price;
@@ -377,25 +391,157 @@ function renderHistoryGrouped(container, items, { onItemClick, priceClass = null
   }
 }
 
-// 節約のモチベーション：累計我慢金額に応じて育つ「我慢の木」
-const GROWTH_STAGES = [
-  { min: 0, emoji: '🌰', label: 'たね' },
-  { min: 1000, emoji: '🌱', label: '芽ばえ' },
-  { min: 10000, emoji: '🌿', label: '若葉' },
-  { min: 50000, emoji: '🪴', label: '育成中' },
-  { min: 200000, emoji: '🌳', label: '大木' },
-  { min: 500000, emoji: '🌳🍎', label: '実り' },
-  { min: 1000000, emoji: '🌲✨', label: '大豊作' }
-];
+// 節約のモチベーション：累計我慢金額に応じて変化する「人類の進化」ビジュアル
+// アイコンは SVG のプリセットから選択、金額のしきい値・ラベルは自由に編集可能（growthStages に保存）
+const ICON_LIBRARY = {
+  crouch: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="60" r="9"/><path d="M24 69 L62 52"/><path d="M28 66 L18 88"/><path d="M62 52 L56 88"/><path d="M62 52 L74 86"/></svg>',
+  hunch: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="30" cy="38" r="9"/><path d="M30 47 L54 58"/><path d="M34 50 L22 80"/><path d="M40 52 L48 42"/><path d="M54 58 L46 88"/><path d="M54 58 L64 84"/></svg>',
+  semi: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="38" cy="24" r="9"/><path d="M38 33 L48 64"/><path d="M40 40 L27 56"/><path d="M44 40 L57 53"/><path d="M48 64 L40 90"/><path d="M48 64 L58 88"/></svg>',
+  upright: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="17" r="9"/><path d="M50 26 L50 62"/><path d="M50 35 L35 54"/><path d="M50 35 L65 54"/><path d="M50 62 L42 90"/><path d="M50 62 L58 90"/></svg>',
+  stand: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 60"/><path d="M50 30 L38 55"/><path d="M50 30 L62 55"/><path d="M50 60 L44 90"/><path d="M50 60 L56 90"/></svg>',
+  triumph: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 58"/><path d="M50 28 L67 12"/><path d="M50 28 L40 50"/><path d="M50 58 L44 88"/><path d="M50 58 L56 88"/></svg>',
+  victory: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="50" cy="14" r="9"/><path d="M50 23 L50 58"/><path d="M50 28 L67 10"/><path d="M50 28 L33 10"/><path d="M50 58 L44 88"/><path d="M50 58 L56 88"/></svg>'
+};
+const ICON_ORDER = ['crouch', 'hunch', 'semi', 'upright', 'stand', 'triumph', 'victory'];
+
+function defaultGrowthStages() {
+  return [
+    { id: genId(), min: 0, iconId: 'crouch', label: 'スタート' },
+    { id: genId(), min: 1000, iconId: 'hunch', label: '一歩ずつ' },
+    { id: genId(), min: 10000, iconId: 'semi', label: '前進中' },
+    { id: genId(), min: 50000, iconId: 'upright', label: '自立' },
+    { id: genId(), min: 200000, iconId: 'stand', label: '堂々' },
+    { id: genId(), min: 500000, iconId: 'triumph', label: '達成' },
+    { id: genId(), min: 1000000, iconId: 'victory', label: '頂点' }
+  ];
+}
+let growthStages = load(KEYS.growthStages, null) || defaultGrowthStages();
+
+function sortedGrowthStages() {
+  return [...growthStages].sort((a, b) => a.min - b.min);
+}
 function getGrowthInfo(total) {
+  const stages = sortedGrowthStages();
   let idx = 0;
-  for (let i = 0; i < GROWTH_STAGES.length; i++) {
-    if (total >= GROWTH_STAGES[i].min) idx = i;
+  for (let i = 0; i < stages.length; i++) {
+    if (total >= stages[i].min) idx = i;
   }
-  const stage = GROWTH_STAGES[idx];
-  const next = GROWTH_STAGES[idx + 1];
+  const stage = stages[idx];
+  const next = stages[idx + 1];
   const pct = next ? Math.min(100, ((total - stage.min) / (next.min - stage.min)) * 100) : 100;
   return { stage, next, pct };
+}
+function iconSvg(iconId) {
+  return ICON_LIBRARY[iconId] || ICON_LIBRARY.crouch;
+}
+
+document.getElementById('editGrowthBtn').addEventListener('click', () => openGrowthSettingsModal());
+
+function openGrowthSettingsModal() {
+  let editingId = null;
+  let selectedIcon = 'crouch';
+
+  const renderList = () => sortedGrowthStages().map(s => `
+    <div class="metric-manage-item">
+      <div class="growth-stage-row">
+        <div class="stage-icon-preview">${iconSvg(s.iconId)}</div>
+        <div class="stage-info">
+          <span class="stage-name">${escapeHTML(s.label)}</span>
+          <span class="stage-amount">¥${fmt(s.min)}以上</span>
+        </div>
+      </div>
+      <span class="method-row-actions">
+        <button class="btn-text edit-stage" data-id="${s.id}">編集</button>
+        <button class="del-metric del-stage" data-id="${s.id}" ${growthStages.length <= 1 ? 'disabled' : ''}>削除</button>
+      </span>
+    </div>`).join('');
+
+  const iconPickerHTML = () => ICON_ORDER.map(id => `
+    <div class="icon-grid-option ${id === selectedIcon ? 'selected' : ''}" data-icon="${id}">${ICON_LIBRARY[id]}</div>
+  `).join('');
+
+  const formTitle = () => editingId === null ? '新しい段階を追加' : '段階を編集';
+  const formHTML = () => {
+    const s = editingId === null ? { label: '', min: '' } : growthStages.find(g => g.id === editingId);
+    return `
+    <div class="form-group"><label>${formTitle()}</label></div>
+    <div class="form-group">
+      <label for="stageLabelInput">名前</label>
+      <input type="text" id="stageLabelInput" placeholder="例: がんばり中" value="${escapeHTML(s.label)}">
+    </div>
+    <div class="form-group">
+      <label for="stageMinInput">しきい値（この金額以上で到達）</label>
+      <input type="number" id="stageMinInput" min="0" placeholder="10000" value="${s.min}">
+    </div>
+    <div class="form-group">
+      <label>アイコン</label>
+      <div class="icon-grid-picker" id="iconGridPicker">${iconPickerHTML()}</div>
+    </div>
+    <div class="modal-actions">
+      ${editingId !== null ? '<button type="button" class="btn-danger" id="cancelEditStageBtn">キャンセル</button>' : ''}
+      <button class="btn-primary accent-gaman-bg" id="saveStageBtn"><span>${editingId === null ? '追加' : '更新'}</span></button>
+    </div>
+  `;
+  };
+
+  openModal(`
+    <h3>育成の設定</h3>
+    <p class="hint-text">累計我慢金額に応じて表示が変化します。段階・金額・アイコンは自由に編集できます。</p>
+    <div id="stagesListWrap" class="metric-manage-list">${renderList()}</div>
+    <div id="stageFormWrap">${formHTML()}</div>
+    <div class="modal-actions"><button class="btn-text" id="growthCloseBtn">閉じる</button></div>
+  `);
+
+  function wireForm() {
+    document.getElementById('iconGridPicker').querySelectorAll('.icon-grid-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        selectedIcon = opt.dataset.icon;
+        document.getElementById('iconGridPicker').querySelectorAll('.icon-grid-option').forEach(o => o.classList.toggle('selected', o.dataset.icon === selectedIcon));
+      });
+    });
+    document.getElementById('saveStageBtn').addEventListener('click', () => {
+      const label = document.getElementById('stageLabelInput').value.trim();
+      const min = parseInt(document.getElementById('stageMinInput').value, 10);
+      if (!label || isNaN(min) || min < 0) return;
+      if (editingId === null) {
+        growthStages.push({ id: genId(), min, iconId: selectedIcon, label });
+      } else {
+        const s = growthStages.find(g => g.id === editingId);
+        s.label = label; s.min = min; s.iconId = selectedIcon;
+        editingId = null;
+      }
+      saveAll();
+      renderGamanTab();
+      rerender();
+    });
+    const cancelBtn = document.getElementById('cancelEditStageBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { editingId = null; selectedIcon = 'crouch'; rerender(); });
+  }
+
+  function rerender() {
+    document.getElementById('stagesListWrap').innerHTML = renderList();
+    document.getElementById('stageFormWrap').innerHTML = formHTML();
+    document.getElementById('stagesListWrap').querySelectorAll('.del-stage').forEach(btn => {
+      btn.addEventListener('click', () => {
+        growthStages = growthStages.filter(g => g.id !== btn.dataset.id);
+        if (editingId === btn.dataset.id) editingId = null;
+        saveAll();
+        renderGamanTab();
+        rerender();
+      });
+    });
+    document.getElementById('stagesListWrap').querySelectorAll('.edit-stage').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingId = btn.dataset.id;
+        const s = growthStages.find(g => g.id === editingId);
+        selectedIcon = s ? s.iconId : 'crouch';
+        rerender();
+      });
+    });
+    wireForm();
+  }
+  rerender();
+  document.getElementById('growthCloseBtn').addEventListener('click', closeModal);
 }
 
 let gamanMonthlyChart = null;
@@ -406,7 +552,7 @@ function renderGamanTab() {
 
   // 育成ビジュアル
   const { stage, next, pct } = getGrowthInfo(total);
-  document.getElementById('growthEmoji').textContent = stage.emoji;
+  document.getElementById('growthEmoji').innerHTML = iconSvg(stage.iconId);
   document.getElementById('growthLabel').textContent = stage.label;
   document.getElementById('growthSub').textContent = next
     ? `次の「${next.label}」まであと¥${fmt(next.min - total)}`
@@ -681,7 +827,8 @@ function openUseEditModal(id) {
 function renderUseTab() {
   document.getElementById('useMonthLabel').textContent = formatMonthLabel(useViewMonth);
   const ym = useViewMonth;
-  const monthItems = useData.filter(i => monthKeyOf(i.date) === ym);
+  // クレジット決済は締め日設定に応じた「利用計上月」でその月の使用として扱う（現金は利用日そのまま）
+  const monthItems = useData.filter(i => usageAttributionMonthOf(i) === ym);
   const monthTotal = monthItems.reduce((s, i) => s + i.price, 0);
   const limit = useLimits[ym] || 0;
   const remaining = limit - monthTotal;
@@ -700,6 +847,7 @@ function renderUseTab() {
 
   renderHistoryGrouped(document.getElementById('useHistory'), monthItems, {
     onItemClick: openUseEditModal,
+    groupKeyFn: item => usageAttributionMonthOf(item),
     renderMeta: item => `<div class="item-meta">${item.date}<span class="method-tag">${escapeHTML(item.method || '')}</span>${isCreditMethod(item.method) ? `<span class="credit-tag">${methodSettlementLabel(methodConfigOf(item.method))}</span>` : ''}</div>`
   });
 }
