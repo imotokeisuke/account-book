@@ -8,9 +8,9 @@
 <!-- PWA / iPhone home screen -->
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="家計簿">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#fdf8f0">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 
@@ -45,6 +45,25 @@
         <span class="stat-label">累計我慢金額</span>
         <div class="stat-amount"><span class="yen">¥</span><span id="gamanTotal">0</span></div>
         <p class="stat-sub">我慢はあなたの資産になる 🌱</p>
+      </div>
+
+      <div class="glass-card growth-card">
+        <div class="growth-visual">
+          <div class="growth-emoji" id="growthEmoji">🌰</div>
+          <div class="growth-info">
+            <div class="growth-label" id="growthLabel">たね</div>
+            <div class="growth-sub" id="growthSub">我慢を記録して育てよう</div>
+          </div>
+        </div>
+        <div class="progress-track"><div class="progress-fill growth-fill" id="growthProgressBar"></div></div>
+        <p class="stat-sub" id="gamanMonthCompare"></p>
+      </div>
+
+      <div class="glass-card chart-card">
+        <div class="chart-card-header">
+          <h2>月ごとの我慢額</h2>
+        </div>
+        <div class="chart-wrap"><canvas id="gamanMonthlyChart"></canvas></div>
       </div>
 
       <form id="gamanForm" class="entry-form glass-card">
@@ -405,6 +424,11 @@
 
     <!-- ============ データ TAB ============ -->
     <section class="tab-panel" id="tab-data" data-tab="data">
+      <div class="month-nav">
+        <button class="month-nav-btn" id="dataPrevMonth" aria-label="前の月">‹</button>
+        <div class="month-nav-label" id="dataMonthLabel">2026年8月時点</div>
+        <button class="month-nav-btn" id="dataNextMonth" aria-label="次の月">›</button>
+      </div>
       <div class="data-summary-grid" id="dataSummaryGrid"></div>
 
       <div class="glass-card chart-card">

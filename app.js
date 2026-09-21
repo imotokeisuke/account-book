@@ -71,16 +71,31 @@ let gamanData = load(KEYS.gaman, []);
 let useData = load(KEYS.use, []);
 let useLimits = load(KEYS.useLimits, {});
 
-// 決済媒体: 旧形式（文字列配列）からの移行に対応
+// 決済媒体: 旧形式（文字列配列 / credit フラグのみの旧オブジェクト形式）からの移行に対応
 function loadPaymentMethods() {
   const raw = load(KEYS.methods, null);
+  const withDefaults = (name, overrides = {}) => Object.assign(
+    { name, credit: DEFAULT_CREDIT_NAMES.includes(name), closingMode: 'monthEnd', closingDay: null },
+    overrides
+  );
   if (!raw || raw.length === 0) {
-    return ['現金', 'PayPay', '楽天', 'UFJ'].map(name => ({ name, credit: DEFAULT_CREDIT_NAMES.includes(name) }));
+    return [
+      withDefaults('現金'),
+      withDefaults('PayPay'),
+      withDefaults('楽天'),
+      withDefaults('UFJ', { closingMode: 'custom', closingDay: 15 })
+    ];
   }
   if (typeof raw[0] === 'string') {
-    return raw.map(name => ({ name, credit: DEFAULT_CREDIT_NAMES.includes(name) }));
+    return raw.map(name => withDefaults(name, name === 'UFJ' ? { closingMode: 'custom', closingDay: 15 } : {}));
   }
-  return raw;
+  // 既存のオブジェクト形式（closingMode/closingDay が無い旧バージョン）を補完
+  return raw.map(m => ({
+    name: m.name,
+    credit: !!m.credit,
+    closingMode: m.closingMode || 'monthEnd',
+    closingDay: m.closingDay != null ? m.closingDay : null
+  }));
 }
 let paymentMethods = loadPaymentMethods();
 
@@ -95,6 +110,7 @@ let appTitle = load(KEYS.appTitle, '家計簿');
 
 let useViewMonth = currentMonthKey();
 let kakeiboViewMonth = currentMonthKey();
+let dataViewMonth = currentMonthKey();
 
 function saveAll() {
   save(KEYS.gaman, gamanData);
@@ -115,9 +131,28 @@ function isCreditMethod(methodName) {
   const pm = paymentMethods.find(p => p.name === methodName);
   return pm ? !!pm.credit : false;
 }
-// 使用タブの記録がクレジット決済媒体の場合、家計簿上は「使用月の翌月」の支出として計上する
+function methodConfigOf(methodName) {
+  return paymentMethods.find(p => p.name === methodName);
+}
+// 締め日設定に応じた表示ラベル（例: 「月末締め」「15日締め」）
+function methodSettlementLabel(pm) {
+  if (!pm || !pm.credit) return '';
+  if (pm.closingMode === 'custom' && pm.closingDay) return `${pm.closingDay}日締め`;
+  return '月末締め';
+}
+// 使用タブの記録がクレジット決済媒体の場合、締め日設定に応じて家計簿上の計上月を決める
+// - 月末締め: 使用月の翌月に計上（例: 9月使用 → 10月払い）
+// - 日付指定（締め日D）: 使用日が D 以前ならその月の翌月、D を過ぎていれば翌々月に計上
+//   （例: 締め日15日の場合、8/16〜9/15の利用はすべて10月払い）
 function settlementMonthOf(item) {
-  return isCreditMethod(item.method) ? addMonths(monthKeyOf(item.date), 1) : monthKeyOf(item.date);
+  const pm = methodConfigOf(item.method);
+  if (!pm || !pm.credit) return monthKeyOf(item.date);
+  if (pm.closingMode === 'custom' && pm.closingDay) {
+    const d = parseInt(item.date.split('-')[2], 10);
+    const D = parseInt(pm.closingDay, 10);
+    return addMonths(monthKeyOf(item.date), d <= D ? 1 : 2);
+  }
+  return addMonths(monthKeyOf(item.date), 1);
 }
 function settlementDateOf(item) {
   const sm = settlementMonthOf(item);
@@ -169,7 +204,7 @@ function openModal(html) {
 // 汎用: 項目編集モーダル（項目名・金額・日付・メモ [・決済媒体]）
 function openEditItemModal({ title, name, price, date, method, memo, onSave, onDelete }) {
   const methodOptions = method !== undefined
-    ? `<div class="form-group"><label>決済媒体</label><select id="mf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('')}</select></div>`
+    ? `<div class="form-group"><label>決済媒体</label><select id="mf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? `（${methodSettlementLabel(m)}）` : ''}</option>`).join('')}</select></div>`
     : '';
   openModal(`
     <h3>${escapeHTML(title)}</h3>
@@ -342,9 +377,61 @@ function renderHistoryGrouped(container, items, { onItemClick, priceClass = null
   }
 }
 
+// 節約のモチベーション：累計我慢金額に応じて育つ「我慢の木」
+const GROWTH_STAGES = [
+  { min: 0, emoji: '🌰', label: 'たね' },
+  { min: 1000, emoji: '🌱', label: '芽ばえ' },
+  { min: 10000, emoji: '🌿', label: '若葉' },
+  { min: 50000, emoji: '🪴', label: '育成中' },
+  { min: 200000, emoji: '🌳', label: '大木' },
+  { min: 500000, emoji: '🌳🍎', label: '実り' },
+  { min: 1000000, emoji: '🌲✨', label: '大豊作' }
+];
+function getGrowthInfo(total) {
+  let idx = 0;
+  for (let i = 0; i < GROWTH_STAGES.length; i++) {
+    if (total >= GROWTH_STAGES[i].min) idx = i;
+  }
+  const stage = GROWTH_STAGES[idx];
+  const next = GROWTH_STAGES[idx + 1];
+  const pct = next ? Math.min(100, ((total - stage.min) / (next.min - stage.min)) * 100) : 100;
+  return { stage, next, pct };
+}
+
+let gamanMonthlyChart = null;
+
 function renderGamanTab() {
   const total = gamanData.reduce((s, i) => s + i.price, 0);
   document.getElementById('gamanTotal').textContent = fmt(total);
+
+  // 育成ビジュアル
+  const { stage, next, pct } = getGrowthInfo(total);
+  document.getElementById('growthEmoji').textContent = stage.emoji;
+  document.getElementById('growthLabel').textContent = stage.label;
+  document.getElementById('growthSub').textContent = next
+    ? `次の「${next.label}」まであと¥${fmt(next.min - total)}`
+    : '最高段階に到達しました！';
+  document.getElementById('growthProgressBar').style.width = pct + '%';
+
+  // 先月との比較
+  const thisMonth = currentMonthKey();
+  const lastMonth = addMonths(thisMonth, -1);
+  const thisMonthTotal = gamanData.filter(i => monthKeyOf(i.date) === thisMonth).reduce((s, i) => s + i.price, 0);
+  const lastMonthTotal = gamanData.filter(i => monthKeyOf(i.date) === lastMonth).reduce((s, i) => s + i.price, 0);
+  const diff = thisMonthTotal - lastMonthTotal;
+  const compareEl = document.getElementById('gamanMonthCompare');
+  if (lastMonthTotal === 0 && thisMonthTotal === 0) {
+    compareEl.textContent = '今月も我慢を記録してみましょう';
+  } else if (diff > 0) {
+    compareEl.textContent = `先月より¥${fmt(diff)}多く我慢できています！このペースを続けましょう 👏`;
+  } else if (diff < 0) {
+    compareEl.textContent = `先月より¥${fmt(Math.abs(diff))}少なめです。今月も一つずつ記録していきましょう`;
+  } else {
+    compareEl.textContent = '先月と同じペースです';
+  }
+
+  renderGamanMonthlyChart();
+
   renderHistoryGrouped(document.getElementById('gamanHistory'), gamanData, {
     onItemClick: id => {
       const item = gamanData.find(i => i.id === id);
@@ -370,6 +457,36 @@ function renderGamanTab() {
   });
 }
 
+function renderGamanMonthlyChart() {
+  if (typeof Chart === 'undefined') return;
+  const months = lastNMonthKeysEndingAt(currentMonthKey(), 6);
+  const labels = months.map(m => m.slice(5) + '月');
+  const values = months.map(m => gamanData.filter(i => monthKeyOf(i.date) === m).reduce((s, i) => s + i.price, 0));
+
+  const ctx = document.getElementById('gamanMonthlyChart').getContext('2d');
+  if (gamanMonthlyChart) gamanMonthlyChart.destroy();
+  gamanMonthlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: 'rgba(79, 127, 181, 0.75)',
+        borderRadius: 6,
+        maxBarThickness: 34
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '¥' + fmt(c.raw) } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#8a7c6c', font: { family: 'Noto Sans JP' } } },
+        y: { grid: { color: 'rgba(90,70,45,0.08)' }, ticks: { color: '#8a7c6c', callback: v => '¥' + currencyFormatter.format(v) } }
+      }
+    }
+  });
+}
+
 /* ---------------------------------------------------------
    6. 使用タブ
 --------------------------------------------------------- */
@@ -382,7 +499,7 @@ function refreshMethodSelects() {
     const sel = document.getElementById(id);
     if (!sel) return;
     const prev = sel.value;
-    sel.innerHTML = paymentMethods.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('');
+    sel.innerHTML = paymentMethods.map(m => `<option value="${escapeHTML(m.name)}">${escapeHTML(m.name)}${m.credit ? `（${methodSettlementLabel(m)}）` : ''}</option>`).join('');
     if (paymentMethods.some(m => m.name === prev)) sel.value = prev;
   });
 }
@@ -393,51 +510,109 @@ document.getElementById('editMethodsBtn').addEventListener('click', () => {
 });
 
 function openMethodsModal() {
+  let editingIdx = null;
+
   const renderList = () => paymentMethods.map((m, idx) => `
     <div class="metric-manage-item">
-      <span>${escapeHTML(m.name)} ${m.credit ? '<span class="credit-tag">翌月請求</span>' : ''}</span>
-      <button class="del-metric" data-idx="${idx}" ${paymentMethods.length <= 1 ? 'disabled' : ''}>削除</button>
+      <span>${escapeHTML(m.name)} ${m.credit ? `<span class="credit-tag">${methodSettlementLabel(m)}</span>` : ''}</span>
+      <span class="method-row-actions">
+        <button class="btn-text edit-metric" data-idx="${idx}">編集</button>
+        <button class="del-metric" data-idx="${idx}" ${paymentMethods.length <= 1 ? 'disabled' : ''}>削除</button>
+      </span>
     </div>`).join('');
-  openModal(`
-    <h3>決済媒体を編集</h3>
-    <div id="methodsListWrap" class="metric-manage-list">${renderList()}</div>
+
+  const formTitle = () => editingIdx === null ? '新しい決済媒体を追加' : `「${escapeHTML(paymentMethods[editingIdx].name)}」を編集`;
+  const formHTML = () => {
+    const m = editingIdx === null ? { name: '', credit: false, closingMode: 'monthEnd', closingDay: 15 } : paymentMethods[editingIdx];
+    return `
     <div class="form-group">
-      <label>新しい決済媒体を追加</label>
+      <label id="methodFormTitle">${formTitle()}</label>
       <div class="limit-editor-row">
-        <input type="text" id="newMethodInput" placeholder="例: 交通系IC">
-        <button class="btn-small" id="addMethodBtn">追加</button>
+        <input type="text" id="newMethodInput" placeholder="例: 交通系IC" value="${escapeHTML(m.name)}" ${editingIdx !== null ? 'disabled' : ''}>
+        <button class="btn-small" id="addMethodBtn">${editingIdx === null ? '追加' : '更新'}</button>
       </div>
     </div>
     <div class="form-group checkbox-group">
-      <label class="checkbox-label"><input type="checkbox" id="newMethodCredit"><span>クレジットカード（使用した月の翌月に支出として計上）</span></label>
+      <label class="checkbox-label"><input type="checkbox" id="newMethodCredit" ${m.credit ? 'checked' : ''}><span>クレジットカード（利用月より後の月に支出として計上）</span></label>
     </div>
+    <div id="closingConfigWrap" class="options-wrap ${m.credit ? '' : 'hidden'}">
+      <label>締め日の設定</label>
+      <select id="closingModeSelect">
+        <option value="monthEnd" ${m.closingMode !== 'custom' ? 'selected' : ''}>月末締め（利用月の翌月に計上）</option>
+        <option value="custom" ${m.closingMode === 'custom' ? 'selected' : ''}>日付を指定する</option>
+      </select>
+      <div id="closingDayWrap" class="form-group ${m.closingMode === 'custom' ? '' : 'hidden'}" style="margin-top:8px;">
+        <label for="closingDayInput">毎月の締め日（例: 15日締めなら「15」）</label>
+        <input type="number" id="closingDayInput" min="1" max="31" value="${m.closingDay || 15}">
+        <p class="hint-text">締め日以前の利用は翌月払い、締め日を過ぎた利用は翌々月払いになります。</p>
+      </div>
+    </div>
+    ${editingIdx !== null ? '<button type="button" class="btn-text" id="cancelEditMethodBtn">編集をキャンセル</button>' : ''}
+  `;
+  };
+
+  openModal(`
+    <h3>決済媒体を編集</h3>
+    <div id="methodsListWrap" class="metric-manage-list">${renderList()}</div>
+    <div id="methodFormWrap">${formHTML()}</div>
     <div class="modal-actions"><button class="btn-primary accent-use-bg" id="methodsCloseBtn"><span>閉じる</span></button></div>
   `);
-  const rerender = () => {
+
+  function wireForm() {
+    const creditCheckbox = document.getElementById('newMethodCredit');
+    creditCheckbox.addEventListener('change', () => {
+      document.getElementById('closingConfigWrap').classList.toggle('hidden', !creditCheckbox.checked);
+    });
+    const closingModeSelect = document.getElementById('closingModeSelect');
+    closingModeSelect.addEventListener('change', () => {
+      document.getElementById('closingDayWrap').classList.toggle('hidden', closingModeSelect.value !== 'custom');
+    });
+    document.getElementById('addMethodBtn').addEventListener('click', () => {
+      const input = document.getElementById('newMethodInput');
+      const val = input.value.trim();
+      const credit = document.getElementById('newMethodCredit').checked;
+      const closingMode = document.getElementById('closingModeSelect').value;
+      const closingDay = closingMode === 'custom' ? (parseInt(document.getElementById('closingDayInput').value, 10) || 15) : null;
+      if (editingIdx === null) {
+        if (!val || paymentMethods.some(m => m.name === val)) return;
+        paymentMethods.push({ name: val, credit, closingMode, closingDay });
+      } else {
+        const m = paymentMethods[editingIdx];
+        m.credit = credit;
+        m.closingMode = closingMode;
+        m.closingDay = closingDay;
+        editingIdx = null;
+      }
+      saveAll();
+      refreshMethodSelects();
+      rerender();
+    });
+    const cancelBtn = document.getElementById('cancelEditMethodBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { editingIdx = null; rerender(); });
+  }
+
+  function rerender() {
     document.getElementById('methodsListWrap').innerHTML = renderList();
+    document.getElementById('methodFormWrap').innerHTML = formHTML();
     document.getElementById('methodsListWrap').querySelectorAll('.del-metric').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.idx, 10);
         paymentMethods.splice(idx, 1);
+        if (editingIdx === idx) editingIdx = null;
         saveAll();
         refreshMethodSelects();
         rerender();
       });
     });
-  };
+    document.getElementById('methodsListWrap').querySelectorAll('.edit-metric').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingIdx = parseInt(btn.dataset.idx, 10);
+        rerender();
+      });
+    });
+    wireForm();
+  }
   rerender();
-  document.getElementById('addMethodBtn').addEventListener('click', () => {
-    const input = document.getElementById('newMethodInput');
-    const val = input.value.trim();
-    if (!val || paymentMethods.some(m => m.name === val)) return;
-    const credit = document.getElementById('newMethodCredit').checked;
-    paymentMethods.push({ name: val, credit });
-    saveAll();
-    refreshMethodSelects();
-    input.value = '';
-    document.getElementById('newMethodCredit').checked = false;
-    rerender();
-  });
   document.getElementById('methodsCloseBtn').addEventListener('click', closeModal);
 }
 
@@ -449,7 +624,7 @@ useForm.addEventListener('submit', e => {
   const method = document.getElementById('useMethod').value;
   const memo = document.getElementById('useMemo').value.trim();
   if (!name || !price || !date) return;
-  useData.push({ id: genId(), name, price, date, method, memo });
+  useData.push({ id: genId(), name, price, date, method, memo, checked: false });
   saveAll();
   document.getElementById('useName').value = '';
   document.getElementById('usePrice').value = '';
@@ -525,7 +700,7 @@ function renderUseTab() {
 
   renderHistoryGrouped(document.getElementById('useHistory'), monthItems, {
     onItemClick: openUseEditModal,
-    renderMeta: item => `<div class="item-meta">${item.date}<span class="method-tag">${escapeHTML(item.method || '')}</span>${isCreditMethod(item.method) ? '<span class="credit-tag">翌月請求</span>' : ''}</div>`
+    renderMeta: item => `<div class="item-meta">${item.date}<span class="method-tag">${escapeHTML(item.method || '')}</span>${isCreditMethod(item.method) ? `<span class="credit-tag">${methodSettlementLabel(methodConfigOf(item.method))}</span>` : ''}</div>`
   });
 }
 
@@ -680,7 +855,7 @@ function openFixedCostEditModal(fc) {
   let optionsState = (fc.options || []).map(o => ({ ...o }));
 
   const methodOptions = isExpense
-    ? `<div class="form-group"><label>決済媒体</label><select id="fmf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === fc.method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? '（翌月請求）' : ''}</option>`).join('')}</select></div>`
+    ? `<div class="form-group"><label>決済媒体</label><select id="fmf_method">${paymentMethods.map(m => `<option value="${escapeHTML(m.name)}" ${m.name === fc.method ? 'selected' : ''}>${escapeHTML(m.name)}${m.credit ? `（${methodSettlementLabel(m)}）` : ''}</option>`).join('')}</select></div>`
     : '';
   const subToggle = isExpense ? `
     <div class="form-group checkbox-group">
@@ -798,7 +973,7 @@ function renderCheckableList(container, items, onToggle, onClick) {
     const row = document.createElement('div');
     row.className = 'checklist-row';
     const linked = item.linked ? `<span class="linked-tag">使用</span>` : '';
-    const credit = item.linked && isCreditMethod(item.method) ? `<span class="credit-tag">翌月請求分</span>` : '';
+    const credit = item.linked && isCreditMethod(item.method) ? `<span class="credit-tag">${methodSettlementLabel(methodConfigOf(item.method))}</span>` : '';
     const sub = item.isSubscription ? `<span class="sub-tag">サブスク</span>` : '';
     const memoHTML = item.memo ? `<div class="item-memo">${escapeHTML(item.memo)}</div>` : '';
     const optionsHTML = item.isSubscription && item.options && item.options.length
@@ -819,7 +994,6 @@ function renderCheckableList(container, items, onToggle, onClick) {
     container.appendChild(row);
   });
   container.querySelectorAll('.check-toggle').forEach(el => {
-    if (el.dataset.linked === 'true') { el.style.opacity = '0.3'; el.style.cursor = 'default'; return; }
     el.addEventListener('click', () => onToggle(el.dataset.id));
   });
   container.querySelectorAll('.history-item').forEach(el => {
@@ -856,6 +1030,14 @@ function renderPlainList(container, items, onClick) {
   container.querySelectorAll('.plain-row').forEach(el => {
     el.addEventListener('click', () => onClick(el.dataset.id, el.dataset.linked === 'true'));
   });
+}
+
+// 支出一覧のチェック対象は expenseData（手入力・固定費）と useData（使用タブ連携分）の両方にまたがるため、
+// どちらにあるかを探して切り替える
+function toggleExpenseOrUseChecked(id) {
+  let it = expenseData.find(i => i.id === id);
+  if (!it) it = useData.find(i => i.id === id);
+  if (it) { it.checked = !it.checked; saveAll(); renderKakeiboTab(); }
 }
 
 function renderKakeiboTab() {
@@ -916,7 +1098,7 @@ function renderKakeiboTab() {
               <div class="check-toggle group-check ${groupChecked ? 'checked' : ''}" data-groupkey="${groupKey}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
               </div>
-              <span>${escapeHTML(m.name)} <span class="credit-tag">翌月請求</span></span>
+              <span>${escapeHTML(m.name)} <span class="credit-tag">${methodSettlementLabel(m)}</span></span>
             </div>
             <span>¥${fmt(subtotal)}</span>
           </div>`;
@@ -933,7 +1115,7 @@ function renderKakeiboTab() {
         groupWrap.appendChild(list);
         renderCheckableList(
           list, items,
-          id => { const it = expenseData.find(i => i.id === id); if (it) { it.checked = !it.checked; saveAll(); renderKakeiboTab(); } },
+          toggleExpenseOrUseChecked,
           (id, isLinked) => { if (isLinked) openUseEditModal(id); else openExpenseEditModal(id); }
         );
         expenseWrap.appendChild(groupWrap);
@@ -949,11 +1131,12 @@ function renderKakeiboTab() {
       list.className = 'history-list';
       groupWrap.appendChild(list);
       renderCheckableList(list, noMethod,
-        id => { const it = expenseData.find(i => i.id === id); if (it) { it.checked = !it.checked; saveAll(); renderKakeiboTab(); } },
+        toggleExpenseOrUseChecked,
         (id, isLinked) => { if (isLinked) openUseEditModal(id); else openExpenseEditModal(id); });
       expenseWrap.appendChild(groupWrap);
     }
   }
+
 
   // 固定費一覧（月に依存せず全件表示）
   const fixedWrap = document.getElementById('fixedList');
@@ -1122,11 +1305,11 @@ function getMetricValueAsOf(key, cutoff, depth = 0) {
   return 0;
 }
 
-function lastNMonthKeys(n) {
+function lastNMonthKeysEndingAt(endYm, n) {
+  const [y, m] = endYm.split('-').map(Number);
   const keys = [];
-  const now = new Date();
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(y, m - 1 - i, 1);
     keys.push(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}`);
   }
   return keys;
@@ -1138,6 +1321,60 @@ function monthEndCutoff(ym) {
   return end < todayStr() ? end : todayStr();
 }
 
+// 指標の内訳（タップした際に表示する内容）
+function getMetricBreakdownRows(metric, cutoff) {
+  if (metric.custom) {
+    return metric.components.map(k => {
+      const m = getAllMetrics().find(mm => mm.key === k);
+      return { label: m ? m.label : k, value: getMetricValueAsOf(k, cutoff) };
+    });
+  }
+  switch (metric.key) {
+    case 'total_assets':
+      return [
+        { label: '貯金額', value: savingsAsOf(cutoff) },
+        { label: 'NISA投資（積立＋成長）', value: investAsOf(cutoff, ['tsumitate', 'seicho']) },
+        { label: 'iDeCo投資', value: investAsOf(cutoff, ['ideco']) }
+      ];
+    case 'savings':
+      return [
+        { label: '収入合計', value: incomeAsOf(cutoff) },
+        { label: '支出合計', value: expenseAsOf(cutoff), negative: true }
+      ];
+    case 'nisa':
+      return [
+        { label: 'NISA（積立）', value: investAsOf(cutoff, ['tsumitate']) },
+        { label: 'NISA（成長）', value: investAsOf(cutoff, ['seicho']) }
+      ];
+    case 'ideco':
+      return [
+        { label: '記録件数', value: investData.filter(i => i.date <= cutoff && i.category === 'ideco').length, isCount: true },
+        { label: '合計金額', value: investAsOf(cutoff, ['ideco']) }
+      ];
+    case 'gaman':
+      return [
+        { label: '記録件数', value: gamanData.filter(i => i.date <= cutoff).length, isCount: true },
+        { label: '合計金額', value: gamanAsOf(cutoff) }
+      ];
+    default:
+      return [];
+  }
+}
+function openMetricBreakdownModal(metric, cutoff) {
+  const rows = getMetricBreakdownRows(metric, cutoff);
+  const total = getMetricValueAsOf(metric.key, cutoff);
+  openModal(`
+    <h3>${escapeHTML(metric.label)}の内訳</h3>
+    <p class="hint-text">${formatMonthLabel(dataViewMonth)}時点</p>
+    <div class="metric-manage-list">
+      ${rows.map(r => `<div class="metric-manage-item"><span>${escapeHTML(r.label)}</span><span>${r.isCount ? r.value + '件' : (r.negative ? '-' : '') + '¥' + fmt(r.value)}</span></div>`).join('')}
+    </div>
+    <div class="options-total breakdown-total">合計：<span>¥${fmt(total)}</span></div>
+    <div class="modal-actions"><button class="btn-primary accent-data-bg" id="breakdownCloseBtn"><span>閉じる</span></button></div>
+  `);
+  document.getElementById('breakdownCloseBtn').addEventListener('click', closeModal);
+}
+
 let trendChart = null;
 let strengthChart = null;
 
@@ -1147,16 +1384,26 @@ function renderDataTabIfActive() {
   }
 }
 
+document.getElementById('dataPrevMonth').addEventListener('click', () => { dataViewMonth = addMonths(dataViewMonth, -1); renderDataTab(); });
+document.getElementById('dataNextMonth').addEventListener('click', () => { dataViewMonth = addMonths(dataViewMonth, 1); renderDataTab(); });
+
 function renderDataTab() {
-  const cutoff = todayStr();
+  const cutoff = monthEndCutoff(dataViewMonth);
+  document.getElementById('dataMonthLabel').textContent = formatMonthLabel(dataViewMonth) + '時点';
   const metrics = getAllMetrics();
 
   const grid = document.getElementById('dataSummaryGrid');
   grid.innerHTML = metrics.map(m => `
-    <div class="metric-card ${m.key === 'total_assets' ? 'wide' : ''}">
+    <div class="metric-card ${m.key === 'total_assets' ? 'wide' : ''}" data-key="${m.key}">
       <span class="stat-label">${escapeHTML(m.label)}</span>
       <div class="stat-amount"><span class="yen">¥</span>${fmt(getMetricValueAsOf(m.key, cutoff))}</div>
     </div>`).join('');
+  grid.querySelectorAll('.metric-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const metric = metrics.find(m => m.key === card.dataset.key);
+      if (metric) openMetricBreakdownModal(metric, cutoff);
+    });
+  });
 
   const select = document.getElementById('chartMetricSelect');
   const prevVal = select.value;
@@ -1172,7 +1419,7 @@ function renderDataTab() {
 
 function renderTrendChart(metricKey) {
   if (!metricKey || typeof Chart === 'undefined') return;
-  const months = lastNMonthKeys(6);
+  const months = lastNMonthKeysEndingAt(dataViewMonth, 6);
   const labels = months.map(m => m.slice(5) + '月');
   const values = months.map(m => getMetricValueAsOf(metricKey, monthEndCutoff(m)));
 
@@ -1203,7 +1450,7 @@ function renderTrendChart(metricKey) {
 // 我慢強さ＝その月の我慢額 ÷ その月の支出額（同一月・使用日ベースで算出。決済のタイミングはずらさない）
 function renderStrengthChart() {
   if (typeof Chart === 'undefined') return;
-  const months = lastNMonthKeys(6);
+  const months = lastNMonthKeysEndingAt(dataViewMonth, 6);
   const labels = months.map(m => m.slice(5) + '月');
   const values = months.map(m => {
     const start = `${m}-01`;
