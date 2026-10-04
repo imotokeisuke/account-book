@@ -1526,7 +1526,67 @@ function getMetricBreakdownRows(metric, cutoff) {
       return [];
   }
 }
+// 収入合計・支出合計が「どの月の、何の数字の合計なのか」を月ごとに遡って確認できるようにする
+function getMonthlyIncomeExpenseBreakdown(uptoMonth) {
+  const allDates = [
+    ...incomeData.map(i => i.date),
+    ...expenseData.map(i => i.date),
+    ...useData.map(i => settlementDateOf(i))
+  ];
+  if (allDates.length === 0) return [];
+  let minMonth = monthKeyOf(allDates[0]);
+  allDates.forEach(d => { const m = monthKeyOf(d); if (m < minMonth) minMonth = m; });
+
+  const months = [];
+  let cursor = minMonth;
+  let guard = 0;
+  while (cursor <= uptoMonth && guard < 600) {
+    months.push(cursor);
+    cursor = addMonths(cursor, 1);
+    guard++;
+  }
+  return months.map(m => {
+    const start = `${m}-01`;
+    const end = monthEndCutoff(m);
+    const income = incomeData.filter(i => i.date >= start && i.date <= end).reduce((s, i) => s + i.price, 0);
+    const manualExpense = expenseData.filter(i => i.date >= start && i.date <= end).reduce((s, i) => s + i.price, 0);
+    const useExpense = useData.filter(i => { const sd = settlementDateOf(i); return sd >= start && sd <= end; }).reduce((s, i) => s + i.price, 0);
+    return { month: m, income, expense: manualExpense + useExpense };
+  });
+}
+
+function openSavingsBreakdownModal(cutoff) {
+  const monthly = getMonthlyIncomeExpenseBreakdown(dataViewMonth);
+  const totalIncome = monthly.reduce((s, m) => s + m.income, 0);
+  const totalExpense = monthly.reduce((s, m) => s + m.expense, 0);
+  const totalSavings = totalIncome - totalExpense;
+  const rowsHTML = monthly.length === 0
+    ? `<div class="empty-state">記録がありません。</div>`
+    : monthly.map(m => `
+      <div class="metric-manage-item breakdown-month-row">
+        <span class="breakdown-month-label">${formatMonthLabel(m.month)}</span>
+        <span class="breakdown-month-values">
+          <span class="amt-plus">収入 ¥${fmt(m.income)}</span>
+          <span class="amt-minus">支出 ¥${fmt(m.expense)}</span>
+        </span>
+      </div>`).join('');
+  openModal(`
+    <h3>貯金額の内訳</h3>
+    <p class="hint-text">${formatMonthLabel(dataViewMonth)}時点・月ごとの収入と支出（使用タブのクレジット利用は引き落とし月に含めています）</p>
+    <div class="metric-manage-list breakdown-monthly-list">${rowsHTML}</div>
+    <div class="breakdown-total">収入合計：¥${fmt(totalIncome)}</div>
+    <div class="breakdown-total">支出合計：¥${fmt(totalExpense)}</div>
+    <div class="breakdown-total">貯金額：<span>¥${fmt(totalSavings)}</span></div>
+    <div class="modal-actions"><button class="btn-primary accent-data-bg" id="breakdownCloseBtn"><span>閉じる</span></button></div>
+  `);
+  document.getElementById('breakdownCloseBtn').addEventListener('click', closeModal);
+}
+
 function openMetricBreakdownModal(metric, cutoff) {
+  if (!metric.custom && metric.key === 'savings') {
+    openSavingsBreakdownModal(cutoff);
+    return;
+  }
   const rows = getMetricBreakdownRows(metric, cutoff);
   const total = getMetricValueAsOf(metric.key, cutoff);
   openModal(`

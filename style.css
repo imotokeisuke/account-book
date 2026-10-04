@@ -298,6 +298,12 @@ input[type="date"] { color-scheme: light; }
 .metric-card .stat-label { font-size: 0.7rem; }
 .metric-card .stat-amount { font-size: 1.3rem; margin-top: 4px; }
 .breakdown-total { text-align: left; margin-top: 4px; font-size: 0.9rem; }
+.breakdown-monthly-list { max-height: 320px; overflow-y: auto; }
+.breakdown-month-row { flex-wrap: wrap; }
+.breakdown-month-label { font-family: var(--font-heading); font-weight: 700; color: var(--text-main); }
+.breakdown-month-values { display: flex; gap: 10px; font-size: 0.78rem; }
+.amt-plus { color: var(--success); font-weight: 600; }
+.amt-minus { color: var(--danger); font-weight: 600; }
 
 .chart-card { display: flex; flex-direction: column; gap: 10px; }
 .chart-card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
